@@ -1,0 +1,45 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python package metadata
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Generated BIDS output
+output/
+
+# Windows reserved name (avoids "unable to index file 'nul'" on git add)
+nul
+
+# Virtual environments
+.venv/
+
+# IDE and editor configs
+.claude/
+.cursor/
+.vscode/
+
+# Temp and scratch files
+temp_*
+workspace.*
+*.pdf
+
+# Linter and type checker caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Generated docs
+docs/*.html
+
+# Dev-only scripts and notes
+scripts/
+
+# Environment files
+.env
+.env.*

@@ -1,0 +1,4 @@
+include README.md
+include LICENSE
+include config/*.yaml
+recursive-include src/resxr/visualization/templates *.html

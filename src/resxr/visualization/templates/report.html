@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ResXR Quality Report</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #f5f6fa;
+            color: #2d3436;
+            line-height: 1.5;
+            padding: 2rem;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        header {
+            background: #fff;
+            border-radius: 8px;
+            padding: 1.5rem 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 1rem; color: #0984e3; }
+        h2 { font-size: 1.15rem; margin-bottom: 0.75rem; color: #2d3436; }
+
+        section {
+            background: #fff;
+            border-radius: 8px;
+            padding: 1.5rem 2rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        /* Key-value tables (header, summary) */
+        header table, .summary table {
+            border-collapse: collapse;
+        }
+        header table th, .summary table th {
+            text-align: left;
+            padding: 0.25rem 1.5rem 0.25rem 0;
+            font-weight: 600;
+            color: #636e72;
+            white-space: nowrap;
+        }
+        header table td, .summary table td {
+            padding: 0.25rem 0;
+        }
+
+        /* Data tables (streams, flags) */
+        .streams table, .flags table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .streams th, .flags th {
+            background: #f5f6fa;
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: #636e72;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            border-bottom: 2px solid #dfe6e9;
+        }
+        .streams td, .flags td {
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid #f0f0f0;
+            font-size: 0.9rem;
+        }
+        .streams tbody tr:hover, .flags tbody tr:hover {
+            background: #f8f9ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ResXR Quality Report</h1>
+            <table>
+                <tr><th>Session ID</th><td>{{ session_id }}</td></tr>
+                <tr><th>Subject</th><td>{{ subject_id }}</td></tr>
+                <tr><th>Session label</th><td>{{ session_label }}</td></tr>
+                <tr><th>Recording start</th><td>{{ utc_start }}</td></tr>
+                <tr><th>UTC offset</th><td>{{ device_utc_offset }}</td></tr>
+                <tr><th>Manufacturer</th><td>{{ manufacturer }}</td></tr>
+                <tr><th>Model</th><td>{{ model_name }}</td></tr>
+                <tr><th>Platform</th><td>{{ platform }}</td></tr>
+                <tr><th>Unity version</th><td>{{ unity_version }}</td></tr>
+                <tr><th>OVR plugin</th><td>{{ ovrplugin_version }}</td></tr>
+                <tr><th>Build ID</th><td>{{ build_id }}</td></tr>
+                <tr><th>Sampling mode</th><td>{{ sampling_mode }}</td></tr>
+                <tr><th>Fixed delta time</th><td>{{ "%.4f"|format(fixed_delta_time) }} s</td></tr>
+                <tr><th>Schema rev</th><td>{{ schema_rev }}</td></tr>
+                <tr><th>Enabled systems</th><td>{{ enabled_systems|join(", ") }}</td></tr>
+            </table>
+        </header>
+
+        <section class="summary">
+            <h2>Summary</h2>
+            <table>
+                <tr>
+                    <th>Total duration</th>
+                    <td>{{ "%.1f"|format(total_duration) }} s</td>
+                </tr>
+                <tr>
+                    <th>Warnings</th>
+                    <td>{{ total_warnings }}</td>
+                </tr>
+            </table>
+        </section>
+
+        <section class="streams">
+            <h2>Tracking Streams</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Stream</th>
+                        <th>Rows</th>
+                        <th>Channels</th>
+                        <th>Expected Frequency (Hz)</th>
+                        <th>Effective Frequency (Hz)</th>
+                        <th>NaN %</th>
+                        <th>Warnings</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for stream in streams %}
+                    <tr>
+                        <td>{{ stream.name }}</td>
+                        <td>{{ stream.rows }}</td>
+                        <td>{{ stream.channels }}</td>
+                        <td>{{ "%.2f"|format(stream.freq_expected) }}</td>
+                        <td>{{ "%.2f"|format(stream.freq_effective) }}</td>
+                        <td>{{ "%.2f"|format(stream.nan_pct) }}</td>
+                        <td>{{ stream.warnings }}</td>
+                    </tr>
+                    <tr>
+                        <td colspan="7">
+                            <details>
+                                <summary>Detailed Stats for {{ stream.name }}</summary>
+                                <table>
+                                    <thead>
+                                        <tr>
+                                            <th>Column</th>
+                                            <th>Count</th>
+                                            <th>NaN %</th>
+                                            <th>Mean</th>
+                                            <th>Median</th>
+                                            <th>Std</th>
+                                            <th>Min</th>
+                                            <th>P5</th>
+                                            <th>P25</th>
+                                            <th>P75</th>
+                                            <th>P95</th>
+                                            <th>Max</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for col in stream.detailed %}
+                                        <tr>
+                                            <td>{{ col.index }}</td>
+                                            <td>{{ col.count }}</td>
+                                            <td>{{ "%.2f"|format(col.nan_pct) }}</td>
+                                            <td>{{ "%.2f"|format(col.mean) }}</td>
+                                            <td>{{ "%.2f"|format(col.median) }}</td>
+                                            <td>{{ "%.2f"|format(col.std) }}</td>
+                                            <td>{{ "%.2f"|format(col.min) }}</td>
+                                            <td>{{ "%.2f"|format(col.p5) }}</td>
+                                            <td>{{ "%.2f"|format(col.p25) }}</td>
+                                            <td>{{ "%.2f"|format(col.p75) }}</td>
+                                            <td>{{ "%.2f"|format(col.p95) }}</td>
+                                            <td>{{ "%.2f"|format(col.max) }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </details>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        {% if timeline_html %}
+        <section class="timeline">
+            <h2>Flag Timeline</h2>
+            {{ timeline_html|safe }}
+        </section>
+        {% endif %}
+
+        <section class="flags">
+            <h2>Quality Flags ({{ flags|length }})</h2>
+            {% if flags %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Check</th>
+                        <th>Stream</th>
+                        <th>Group</th>
+                        <th>Severity</th>
+                        <th>Start (s)</th>
+                        <th>End (s)</th>
+                        <th>Duration (s)</th>
+                        <th>Message</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for f in flags %}
+                    <tr>
+                        <td>{{ f.check }}</td>
+                        <td>{{ f.stream }}</td>
+                        <td>{{ f.group }}</td>
+                        <td>{{ f.severity }}</td>
+                        <td>{{ "%.2f"|format(f.start) }}</td>
+                        <td>{{ "%.2f"|format(f.end) }}</td>
+                        <td>{{ "%.2f"|format(f.duration) }}</td>
+                        <td>{{ f.message }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <p>No quality flags detected.</p>
+            {% endif %}
+        </section>
+
+        <footer style="text-align:center; padding:1.5rem 0 0.5rem; color:#b2bec3; font-size:0.8rem;">
+            Generated {{ generated_at }} by ResXR v{{ resxr_version }}
+        </footer>
+    </div>
+</body>
+</html>
