@@ -1,0 +1,82 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "resxr"
+version = "0.1.0"
+description = "VR Data Processing Pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+  {name = "ResXR Contributors", email = "resxr.toolkit@gmail.com"}
+]
+
+# Minimum requirements for your package to run
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",     
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "plotly>=5.0.0",
+    "jinja2>=3.0.0",
+]
+
+# Optional dependencies for development
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.14.0",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Intended Audience :: Science/Research",
+]
+
+[project.urls]
+Homepage = "https://resxr.org"
+Repository = "https://github.com/ResXR/ResXR"
+"Bug Tracker" = "https://github.com/ResXR/ResXR/issues"
+
+[project.scripts]
+resxr = "resxr.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Ruff configuration - linter and formatter
+[tool.ruff]
+target-version = "py310"  # Match minimum Python version
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort (import sorting)
+    "UP",     # pyupgrade (modernize code for py310+)
+    "B",      # flake8-bugbear (find bugs)
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+]
+
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

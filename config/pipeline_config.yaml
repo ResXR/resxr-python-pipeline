@@ -1,0 +1,208 @@
+# ResXR Pipeline Configuration
+# ============================
+# This file configures the XR data processing pipeline.
+# Modify the paths and settings below to match your data.
+
+# BIDS Specification Settings
+# ---------------------------
+# Values for BIDS metadata files
+bids:
+  missing_values: "NaN"
+  dataset_type: "raw"
+  license: "CC0"
+  authors: []
+  reference_frame:
+    description: "Global VR playspace coordinate system. Positive X is right, Y is up (superior), Z is forward (anterior)"
+    rotation_rule: "left-hand"
+    rotation_order: "ZXY"
+    spatial_axes: "RSA"
+
+# Sampling Frequencies (Hz)
+# -------------------------
+# Expected sampling rate for each tracking system
+sampling_frequencies:  # values must be floats (use 90.0, not 90)
+  Head: 72.0
+  Hands: 90.0
+  Eyes: 30.0
+  Face: 30.0
+  Body: 72.0
+  Controllers: 90.0
+
+# System Descriptions
+# -------------------
+# Task descriptions for each tracking system (used in BIDS sidecar)
+system_descriptions:
+  Head: "Head position and rotation tracking from Meta Quest VR headset"
+  Hands: "Hand and finger tracking from Meta Quest VR headset including 26 joints per hand"
+  Eyes: "Eye gaze tracking from Meta Quest VR headset"
+  Face: "Facial expression tracking using FACS blend shapes from Meta Quest VR headset"
+  Body: "Full body joint tracking from Meta Quest VR headset"
+  Controllers: "VR controller position and rotation tracking"
+
+# Input Configuration
+# -------------------
+# Specifies where to find the source XR tracking data
+input:
+  # Root directory containing session folders (relative to project root)
+  data_dir: DATA
+
+  # File patterns for auto-discovery
+  continuous_data_pattern: "*_ContinuousData*.csv"
+  face_data_pattern: "*_FaceExpressionData*.csv"
+  metadata_pattern: "*session_metadata.json"
+  events_data_pattern: "*events*.csv"
+
+# Output Configuration
+# --------------------
+# Specifies BIDS output settings
+output:
+  # Root directory for BIDS output (relative to project root)
+  bids_root: output
+
+  # Dataset metadata
+  dataset_name: "ResXR VR Tracking Dataset"
+  bids_version: "1.10.1"
+  task_name: "VRtracking"
+
+  # Overwrite existing files
+  overwrite: false
+
+  
+# Session Mappings
+# ----------------
+# Maps source directories to BIDS subject/session identifiers.
+# If empty, sessions will be auto-discovered and numbered.
+session_mappings:
+  - source_dir: "test_data"
+    subject_id: "01"
+    session_label: "01"
+
+  # - source_dir: "17.9.25_hands_TEST_002"
+  #   subject_id: "02"
+  #   session_label: "01"
+
+# Device Configuration
+# --------------------
+# Metadata about the VR hardware (used in BIDS sidecar JSON files)
+device:
+  # Manufacturer name (e.g., "Meta", "HTC", "Valve")
+  manufacturer: "Meta"
+
+  # Device model name (e.g., "Meta Quest 3", "Meta Quest Pro", "Vive Pro")
+  model_name: "Quest Pro"
+
+  # Optional: Override task description for all tracking systems
+  # If not set, uses default descriptions per tracking system
+  # task_description: "Custom task description for all motion files"
+
+# Tracking Systems
+# ----------------
+# Enable/disable specific tracking systems
+systems:
+  Head:
+    enabled: true
+  Hands:
+    enabled: true
+  Eyes:
+    enabled: true
+  Face:
+    enabled: true
+  Body:
+    enabled: false
+  Controllers:
+    enabled: false
+
+# Validation Configuration
+# ------------------------
+# Quality check settings
+validation:
+  # Which checks to run
+  enabled_checks:
+    - hands_tracking_loss
+    - sampling_rate
+    - stats_summary
+    - eyes_closed
+
+  # Column groups for column-scoped validation checks.
+  # Each group defines a named set of columns; checks decide how to use them.
+  column_groups:
+    - name: "Left Hand"
+      description: "Left hand wrist position and rotation"
+      columns:
+        - Left_XRHand_Wrist_x
+        - Left_XRHand_Wrist_y
+        - Left_XRHand_Wrist_z
+        - Left_XRHand_Wrist_Rotation_x
+        - Left_XRHand_Wrist_Rotation_y
+        - Left_XRHand_Wrist_Rotation_z
+    - name: "Right Hand"
+      description: "Right hand wrist position and rotation"
+      columns:
+        - Right_XRHand_Wrist_x
+        - Right_XRHand_Wrist_y
+        - Right_XRHand_Wrist_z
+        - Right_XRHand_Wrist_Rotation_x
+        - Right_XRHand_Wrist_Rotation_y
+        - Right_XRHand_Wrist_Rotation_z
+
+  # Optional per-check settings. All keys here are passed through to checks
+  # via ValidationConfig.get(). Add or uncomment as needed.
+  settings:
+    # Assign which column groups each check receives (by group name).
+    # If omitted, checks receive all configured column_groups.
+    check_column_groups:
+      hands_tracking_loss:
+        - "Left Hand"
+        - "Right Hand"
+
+    # eyes_closed check thresholds (defaults used if omitted)
+    # eyes_closed_threshold: 0.9
+    # eyes_closed_min_duration: 0.1
+    # eyes_closed_use_min_duration: true
+
+# Preprocessing Configuration
+# ---------------------------
+# Data cleaning and transformation settings
+preprocessing:
+  # Apply quality flag masking via NaN replacement (applies to derivative dataset only)
+  # Set to false to disable masking entirely (derivative data = cleaned but unmasked).
+  # When true, segments marked with mask=True in quality flags are replaced with NaN.
+  # Preserves temporal continuity — no rows are deleted (BIDS-compliant). RAW dataset is never modified.
+  apply_quality_masking: false
+
+  # Optional: List of specific checks to apply masking for (only used when apply_quality_masking is true)
+  # If omitted or null, applies ALL flags where mask=True
+  # If provided, only applies flags from these specific checks
+  # Example: ["hands_tracking_loss"] to only mask hands tracking loss segments, not sampling issues
+  masking_checks: null
+  # masking_checks:  # Uncomment to selectively enable specific checks
+  #   - hands_tracking_loss
+
+  # Alternate time columns per tracking system
+  # Maps system names to exactly one alternate per-system time column.
+  # When set, the splitter renames the alternate column to "timestamp"
+  # (for internal pipeline use) and preserves the original global
+  # "timestamp" as "timeSinceStartup".
+  #
+  # At write time, prepare_motion_data converts these into BIDS channels:
+  #   timestamp        → "latency"        (per-system seconds from onset)
+  #   timeSinceStartup → "latency_global" (global Unity clock from onset)
+  #
+  # If no alternate is configured for a system, "timestamp" IS the global
+  # clock and only "latency" appears in the output (no "latency_global").
+  #
+  # Leave empty {} to use global timestamp for all systems.
+  alternate_time_columns:
+    Head: "Node_Head_Time"
+    Hands: "Node_HandLeft_Time"
+    Eyes: "Eyes_Time"
+    Face: "Face_Time"
+    Body: "Body_Time"
+    Controllers: "Node_ControllerLeft_Time"
+
+# Report Configuration
+# --------------------
+# HTML quality report (dashboard)
+report:
+  enabled: true
+  output_dir: null
