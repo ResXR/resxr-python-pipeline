@@ -179,22 +179,24 @@ If using task/stimulus events, provide a CSV with these columns:
 
 | Column     | Type   | Description                                                  | Example                                           |
 | ---------- | ------ | ------------------------------------------------------------ | ------------------------------------------------- |
-| `name`     | string | Event type/label                                             | `"stimulus_onset"`, `"response"`, `"trial_start"` |
 | `onset`    | float  | Event start time in seconds (relative to session start)      | `2.5`, `5.832`                                    |
 | `duration` | float  | Event duration in seconds (use `0` for instantaneous events) | `1.5`, `0`                                        |
+| `name`     | string | Event type/label; exported as BIDS `trial_type`              | `"stimulus_onset"`, `"response"`, `"trial_start"` |
 
 
 **Example events CSV:**
 
 ```csv
-name,onset,duration
-trial_start,0.0,0
-stimulus_A,2.5,1.5
-response,4.2,0
-trial_end,5.0,0
+onset,duration,name
+0.0,0,trial_start
+2.5,1.5,stimulus_A
+4.2,0,response
+5.0,0,trial_end
 ```
 
 **Note:** Duration of `0` indicates an instantaneous event (e.g., button press, stimulus onset).
+
+At BIDS export, ResXR writes events to the session `motion/` directory using the configured task name, for example `sub-01_ses-01_task-VRtracking_events.tsv`. The input `name` column is exported as BIDS `trial_type`, and the output `events.tsv` columns start with BIDS-required `onset`, `duration`, then `trial_type`.
 
 ---
 
@@ -278,6 +280,7 @@ system_descriptions:
 | `continuous_data_pattern` | Glob pattern for main tracking CSV     | Yes      |
 | `face_data_pattern`       | Glob pattern for face tracking CSV     | Yes      |
 | `metadata_pattern`        | Glob pattern for session metadata JSON | Yes      |
+| `events_data_pattern`     | Glob pattern for optional events CSV   | No       |
 
 
 ### Output Options
