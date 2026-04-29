@@ -188,7 +188,7 @@ def write_bids_events(
     Parameters
     ----------
     events_df : pd.DataFrame
-        Events data with columns: trial_type, onset, duration
+        Events data with columns: onset, duration, trial_type
     output_path : Path
         Path to output events.tsv file
 
@@ -199,7 +199,7 @@ def write_bids_events(
     """
     output_path = Path(output_path)
 
-    required_cols = ["trial_type", "onset", "duration"]
+    required_cols = ["onset", "duration", "trial_type"]
     missing = [c for c in required_cols if c not in events_df.columns]
     if missing:
         raise BIDSWriteError(f"Events DataFrame missing required columns: {missing}")
