@@ -295,7 +295,8 @@ def write_bids_output(
         events_dir = bids.get_motion_dir(session, derivative=False)
         events_dir.mkdir(parents=True, exist_ok=True)
         events_path = (
-            events_dir / f"sub-{session.subject_id}_ses-{session.session_label}_events.tsv"
+            events_dir
+            / f"sub-{session.subject_id}_ses-{session.session_label}_task-{config.output.task_name}_events.tsv"
         )
         write_bids_events(session.raw_events_data, events_path)
         logger.info(f"Wrote events: {events_path.name}")
