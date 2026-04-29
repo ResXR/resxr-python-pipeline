@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "resxr"
-version = "0.1.0"
+version = "0.1.1"
 description = "VR Data Processing Pipeline"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -23,13 +23,6 @@ dependencies = [
     "jinja2>=3.0.0",
 ]
 
-# Optional dependencies for development
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "ruff>=0.14.0",
-]
-
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: Apache Software License",
@@ -40,6 +33,13 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Intended Audience :: Science/Research",
+]
+
+# Optional dependencies for development
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.14.0",
 ]
 
 [project.urls]
