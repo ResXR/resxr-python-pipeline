@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pandas as pd
 import pytest
@@ -13,7 +11,6 @@ from resxr.core.constants import TrackingSystem
 from resxr.core.session import QualityFlag, Session, SessionMetadata, TrackingStream
 from resxr.validation.checks.stats import compute_stream_stats
 from resxr.visualization.report import ReportGenerator
-
 
 # ---------------------------------------------------------------------------
 # Helpers
