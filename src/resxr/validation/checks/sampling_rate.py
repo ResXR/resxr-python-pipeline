@@ -10,6 +10,7 @@ import numpy as np
 
 from ...core.config import ValidationConfig
 from ...core.session import QualityFlag, Session, TrackingStream
+from ...utils import find_recording_offset_index, find_recording_onset_index
 from ..registry import register_check
 
 
@@ -42,50 +43,55 @@ class SamplingRateCheck:
         if actual_rate <= 0:
             return flags
 
-        start = stream._start_timestamp()
-        if start is None:
+        onset_idx = find_recording_onset_index(timestamps)
+        offset_idx = find_recording_offset_index(timestamps)
+        if onset_idx is None or offset_idx is None or onset_idx > offset_idx:
             return flags
-        end = float(timestamps[-1])
+
+        # Use a slice for numeric work and a full-length mask for from_mask().
+        window = slice(onset_idx, offset_idx + 1)
+        valid_window_mask = np.zeros(len(timestamps), dtype=bool)
+        valid_window_mask[window] = True
+        valid_timestamps = timestamps[window]
 
         # Check deviation against tolerance from config
         if expected_rate > 0:
             deviation = abs(actual_rate - expected_rate) / expected_rate
 
             if deviation > config.get("sampling_rate_tolerance", 0.10):
-                flags.append(
-                    QualityFlag(
+                flags.extend(
+                    QualityFlag.from_mask(
+                        timestamps=timestamps,
+                        boolean_mask=valid_window_mask,
+                        severity="warning",
                         check_name=self.name,
                         system=stream.system,
-                        start_time=start,
-                        end_time=end,
-                        severity="warning",
                         message=(
                             f"Sampling rate mismatch: expected {expected_rate:.1f}Hz, "
                             f"got {actual_rate:.1f}Hz ({deviation * 100:.1f}% deviation)"
                         ),
-                        mask=False,  # Don't mask for rate mismatch
+                        should_mask=False,  # Don't mask for rate mismatch
                         target_columns=[],  # Sampling rate issues apply to all columns
                     )
                 )
 
         # Also check for highly irregular sampling
-        unique_ts = np.unique(timestamps)
-        unique_ts = unique_ts[unique_ts >= start]
+        unique_ts = np.unique(valid_timestamps[np.isfinite(valid_timestamps)])
         time_diffs = np.diff(unique_ts)
 
         # Calculate coefficient of variation
         if len(time_diffs) > 1 and np.mean(time_diffs) > 0:
             cv = np.std(time_diffs) / np.mean(time_diffs)
             if cv > config.get("sampling_cv_threshold", 0.50):
-                flags.append(
-                    QualityFlag(
+                flags.extend(
+                    QualityFlag.from_mask(
+                        timestamps=timestamps,
+                        boolean_mask=valid_window_mask,
+                        severity="warning",
                         check_name=self.name,
                         system=stream.system,
-                        start_time=start,
-                        end_time=end,
-                        severity="warning",
                         message=f"Highly irregular sampling: CV={cv:.2f}",
-                        mask=False,
+                        should_mask=False,
                         target_columns=[],  # Irregular sampling applies to all columns
                     )
                 )

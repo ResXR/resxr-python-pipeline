@@ -225,3 +225,26 @@ class TestSamplingRateEdgeCases:
                 data=pd.DataFrame({"Node_Head_px": [0.0, 1.0, 2.0]}),
                 sampling_frequency=90.0,
             )
+
+    def test_trailing_zero_timestamps_do_not_create_invalid_interval(self, full_session):
+        """Trailing zeros should not produce a start_time > end_time flag interval."""
+        df = pd.DataFrame(
+            {
+                "timestamp": np.array([0.0, 1.0, 2.0, 3.0, 0.0, 0.0]),
+                "Node_Head_px": np.zeros(6),
+            }
+        )
+        stream = TrackingStream(
+            system=TrackingSystem.HEAD,
+            data=df,
+            sampling_frequency=90.0,
+        )
+        check = SamplingRateCheck()
+        config = _make_config()
+
+        flags = check(stream, full_session, config)
+        rate_flags = [f for f in flags if "mismatch" in f.message.lower()]
+
+        assert len(rate_flags) == 1
+        assert rate_flags[0].start_time == pytest.approx(1.0)
+        assert rate_flags[0].end_time == pytest.approx(3.0)
