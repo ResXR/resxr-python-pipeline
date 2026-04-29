@@ -269,12 +269,19 @@ class TestWriteBidsEvents:
         assert (tmp_path / "events.json").exists()
 
     def test_required_columns_present(self, tmp_path):
-        """Written TSV has trial_type, onset, and duration columns."""
+        """Written TSV has onset, duration, and trial_type columns."""
         path = tmp_path / "events.tsv"
         write_bids_events(_events_df(), path)
         df = pd.read_csv(path, sep="\t")
         for col in ("trial_type", "onset", "duration"):
             assert col in df.columns
+
+    def test_bids_required_columns_are_first(self, tmp_path):
+        """BIDS requires onset first and duration second in events.tsv."""
+        path = tmp_path / "events.tsv"
+        write_bids_events(_events_df(), path)
+        df = pd.read_csv(path, sep="\t")
+        assert list(df.columns[:3]) == ["onset", "duration", "trial_type"]
 
     def test_missing_required_column_raises(self, tmp_path):
         """DataFrame missing 'onset' column raises BIDSWriteError."""
