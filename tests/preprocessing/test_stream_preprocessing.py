@@ -66,7 +66,7 @@ class TestApplyQualityMasking:
         ts = make_timestamps(200, 90.0, 1.0)
         flagged_mask = (result["timestamp"] >= ts[10]) & (result["timestamp"] <= ts[20])
         # All data columns in the flagged range should be NaN
-        data_cols = [c for c in result.columns if c != "timestamp"]
+        data_cols = [c for c in result.columns if c not in {"timestamp", "timeSinceStartup"}]
         for col in data_cols:
             assert result.loc[flagged_mask, col].isna().all(), (
                 f"Column {col} not NaN in flagged range"
@@ -114,7 +114,7 @@ class TestApplyQualityMasking:
         result = apply_quality_masking(stream)
         ts = make_timestamps(200, 90.0, 1.0)
         flagged = (result["timestamp"] >= ts[10]) & (result["timestamp"] <= ts[20])
-        data_cols = [c for c in result.columns if c != "timestamp"]
+        data_cols = [c for c in result.columns if c not in {"timestamp", "timeSinceStartup"}]
         assert len(data_cols) > 0
         for col in data_cols:
             assert result.loc[flagged, col].isna().all()
@@ -268,7 +268,7 @@ class TestApplyQualityMasking:
         stream = _stream_with_masking_flag(start_row=10, end_row=20)
         result = apply_quality_masking(stream, masking_checks=[])
         # No NaN should appear — the empty list filters out every flag
-        data_cols = [c for c in result.columns if c != "timestamp"]
+        data_cols = [c for c in result.columns if c not in {"timestamp", "timeSinceStartup"}]
         for col in data_cols:
             assert result[col].notna().all(), f"Column {col} has NaN despite masking_checks=[]"
 
@@ -276,11 +276,86 @@ class TestApplyQualityMasking:
         """A flag spanning the entire stream NaN-ifies every data row."""
         stream = _stream_with_masking_flag(start_row=0, end_row=199)
         result = apply_quality_masking(stream)
-        data_cols = [c for c in result.columns if c != "timestamp"]
+        data_cols = [c for c in result.columns if c not in {"timestamp", "timeSinceStartup"}]
         for col in data_cols:
             assert result[col].isna().all(), (
                 f"Column {col} not fully NaN despite full-stream masking flag"
             )
+
+    def test_dropout_rows_masked_when_per_system_clock_is_zero(self):
+        """Core bug regression: per-system timestamp drops to 0 during dropout while
+        timeSinceStartup keeps ticking. Masking must NaN the dropout rows using
+        timeSinceStartup, not the zeroed per-system clock."""
+        n = 100
+        ts_per_system = make_timestamps(n, 90.0, 1.0)
+        ts_global = make_timestamps(n, 90.0, 1.0)
+        ts_per_system[30:35] = 0.0  # hardware dropout: per-system clock zeroes out
+
+        data = pd.DataFrame(
+            {
+                "timestamp": ts_per_system,
+                "timeSinceStartup": ts_global,
+                "Node_Head_px": np.ones(n),
+            }
+        )
+        stream = TrackingStream(
+            system=TrackingSystem.HEAD,
+            data=data,
+            sampling_frequency=90.0,
+        )
+        # Flag uses timeSinceStartup boundaries (as fixed checks now produce)
+        stream.quality_flags = [
+            QualityFlag(
+                check_name="test",
+                system=TrackingSystem.HEAD,
+                start_time=float(ts_global[30]),
+                end_time=float(ts_global[34]),
+                severity="warning",
+                message="dropout",
+                mask=True,
+            )
+        ]
+
+        result = apply_quality_masking(stream)
+
+        # Dropout rows (30-34) must be NaN despite having timestamp == 0.0
+        assert result.loc[30:34, "Node_Head_px"].isna().all(), (
+            "Dropout rows not masked — masking may be comparing against per-system clock"
+        )
+        # Rows outside dropout must be untouched
+        assert result.loc[0:29, "Node_Head_px"].notna().all()
+        assert result.loc[35:, "Node_Head_px"].notna().all()
+
+    def test_missing_timeSinceStartup_returns_unmasked_data_and_logs_error(
+        self, caplog
+    ):
+        """If timeSinceStartup is absent, masking logs an error and returns data unchanged."""
+        import logging
+
+        stream = TrackingStream(
+            system=TrackingSystem.HEAD,
+            data=_head_df(50).drop(columns=["timeSinceStartup"]),
+            sampling_frequency=90.0,
+        )
+        ts = make_timestamps(50, 90.0, 1.0)
+        stream.quality_flags = [
+            QualityFlag(
+                check_name="c",
+                system=TrackingSystem.HEAD,
+                start_time=float(ts[10]),
+                end_time=float(ts[20]),
+                severity="warning",
+                message="m",
+                mask=True,
+            )
+        ]
+
+        with caplog.at_level(logging.ERROR):
+            result = apply_quality_masking(stream)
+
+        assert "timeSinceStartup" in caplog.text
+        # Data unchanged (error path returns early)
+        assert not result.isnull().any().any()
 
 
 # ===========================================================================
@@ -360,7 +435,8 @@ class TestPrepareMotionData:
 
     def test_latency_global_absent_without_timeSinceStartup(self, head_stream):
         """'latency_global' is NOT added when timeSinceStartup is absent."""
-        result = prepare_motion_data(head_stream.data)
+        df = head_stream.data.drop(columns=["timeSinceStartup"])
+        result = prepare_motion_data(df)
         assert "latency_global" not in result.columns
 
     def test_data_columns_preserved(self, head_stream):

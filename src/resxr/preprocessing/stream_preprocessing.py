@@ -29,7 +29,7 @@ Provides two independent preprocessing stages:
 Pipeline data flow::
 
     splitter (split only)
-        → validate (quality flags use per-system ``timestamp``)
+        → validate (quality flags use ``timeSinceStartup`` for boundaries)
         → preprocess_stream (optional masking for derivative)
         → prepare_motion_data (LATENCY channels + strip internal cols)
         → write BIDS (motion.tsv, channels.tsv, motion.json)
@@ -103,9 +103,18 @@ def apply_quality_masking(
     time_cols = {"timestamp", "timeSinceStartup"}
     data_cols = [c for c in data.columns if c not in time_cols]
 
+    # Quality flags store timeSinceStartup values; compare against the same clock.
+    if "timeSinceStartup" not in data.columns:
+        logger.error(
+            f"{stream.system.value}: timeSinceStartup column missing — "
+            "cannot apply quality masking. "
+            "Check alternate_time_columns in pipeline_config.yaml."
+        )
+        return data
+
     # Optimize: Use NumPy arrays for vectorized operations
-    timestamps = data["timestamp"].values
-    data_start, data_end = timestamps.min(), timestamps.max()
+    ts_for_mask = data["timeSinceStartup"].values
+    data_start, data_end = ts_for_mask.min(), ts_for_mask.max()
 
     # Build column → mask mapping
     column_masks = {}
@@ -116,7 +125,7 @@ def apply_quality_masking(
             continue
 
         # Vectorized time mask
-        time_mask = (timestamps >= flag.start_time) & (timestamps <= flag.end_time)
+        time_mask = (ts_for_mask >= flag.start_time) & (ts_for_mask <= flag.end_time)
 
         # Determine which columns to mask
         if not flag.target_columns:
