@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from resxr.utils import (
-    find_recording_offset_index,
+    find_first_nonzero_index,
+    find_internal_zero_blocks,
+    find_last_nonzero_index,
     find_recording_onset,
     format_duration,
 )
@@ -123,53 +125,225 @@ class TestFindRecordingOnset:
 
 
 # ===========================================================================
-# find_recording_offset_index
+# find_last_nonzero_index
 # ===========================================================================
 
 
-class TestFindRecordingOffsetIndex:
+class TestFindLastNonzeroIndex:
     def test_no_trailing_zeros_returns_last_index(self):
         """[1.0, 2.0, 3.0] → index 2 (the last element)."""
         ts = np.array([1.0, 2.0, 3.0])
-        assert find_recording_offset_index(ts) == 2
+        assert find_last_nonzero_index(ts) == 2
 
     def test_trailing_zeros_returns_last_nonzero(self):
         """[1.0, 2.0, 3.0, 0.0, 0.0] → index 2."""
         ts = np.array([1.0, 2.0, 3.0, 0.0, 0.0])
-        assert find_recording_offset_index(ts) == 2
+        assert find_last_nonzero_index(ts) == 2
 
     def test_leading_and_trailing_zeros(self):
         """[0, 0, 1.0, 2.0, 0, 0] → index 3."""
         ts = np.array([0.0, 0.0, 1.0, 2.0, 0.0, 0.0])
-        assert find_recording_offset_index(ts) == 3
+        assert find_last_nonzero_index(ts) == 3
 
     def test_all_zeros_returns_none(self):
         """All-zero array → None."""
         ts = np.zeros(5)
-        assert find_recording_offset_index(ts) is None
+        assert find_last_nonzero_index(ts) is None
 
     def test_empty_array_returns_none(self):
         """Empty array → None."""
         ts = np.array([])
-        assert find_recording_offset_index(ts) is None
+        assert find_last_nonzero_index(ts) is None
 
     def test_single_nonzero_element(self):
         """Single non-zero element → index 0."""
         ts = np.array([42.0])
-        assert find_recording_offset_index(ts) == 0
+        assert find_last_nonzero_index(ts) == 0
 
     def test_single_zero_element_returns_none(self):
         """Single zero element → None."""
         ts = np.array([0.0])
-        assert find_recording_offset_index(ts) is None
+        assert find_last_nonzero_index(ts) is None
 
     def test_nan_trailing_values_skipped(self):
         """Trailing NaN values are skipped like trailing zeros."""
         ts = np.array([1.0, 2.0, 3.0, np.nan, np.nan])
-        assert find_recording_offset_index(ts) == 2
+        assert find_last_nonzero_index(ts) == 2
 
     def test_returns_int(self):
         """Return type is int (not numpy scalar)."""
         ts = np.array([0.0, 5.0, 10.0])
-        result = find_recording_offset_index(ts)
+        result = find_last_nonzero_index(ts)
         assert isinstance(result, int)
+
+
+# ===========================================================================
+# find_first_nonzero_index
+# ===========================================================================
+
+
+class TestFindFirstNonzeroIndex:
+    def test_no_leading_zeros_returns_zero(self):
+        """[1.0, 2.0, 3.0] → index 0."""
+        ts = np.array([1.0, 2.0, 3.0])
+        assert find_first_nonzero_index(ts) == 0
+
+    def test_leading_zeros_skipped(self):
+        """[0, 0, 0, 1.0, 2.0] → index 3."""
+        ts = np.array([0.0, 0.0, 0.0, 1.0, 2.0])
+        assert find_first_nonzero_index(ts) == 3
+
+    def test_all_zeros_returns_none(self):
+        """All-zero array → None."""
+        ts = np.zeros(10)
+        assert find_first_nonzero_index(ts) is None
+
+    def test_empty_array_returns_none(self):
+        """Empty array → None."""
+        ts = np.array([])
+        assert find_first_nonzero_index(ts) is None
+
+    def test_single_nonzero_returns_zero(self):
+        """[5.0] → index 0."""
+        ts = np.array([5.0])
+        assert find_first_nonzero_index(ts) == 0
+
+    def test_single_zero_returns_none(self):
+        """[0.0] → None."""
+        ts = np.array([0.0])
+        assert find_first_nonzero_index(ts) is None
+
+    def test_leading_nan_skipped(self):
+        """NaN prefix is skipped — first non-zero finite value wins."""
+        ts = np.array([np.nan, np.nan, 3.0, 4.0])
+        assert find_first_nonzero_index(ts) == 2
+
+    def test_negative_value_is_nonzero(self):
+        """Negative timestamps count as non-zero."""
+        ts = np.array([0.0, -1.0, 2.0])
+        assert find_first_nonzero_index(ts) == 1
+
+    def test_returns_int_type(self):
+        """Return type is int (not numpy scalar)."""
+        ts = np.array([0.0, 5.0, 10.0])
+        result = find_first_nonzero_index(ts)
+        assert isinstance(result, int)
+
+    def test_large_array_with_leading_zeros(self):
+        """Works on a large array; returns correct index."""
+        ts = np.zeros(1000)
+        ts[500] = 3.14
+        assert find_first_nonzero_index(ts) == 500
+
+
+# ===========================================================================
+# find_internal_zero_blocks
+# ===========================================================================
+
+
+class TestFindInternalZeroBlocks:
+    def test_all_valid_no_blocks(self):
+        """No zeros or NaN inside window → []."""
+        ts = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        assert find_internal_zero_blocks(ts) == []
+
+    def test_empty_array_no_blocks(self):
+        """Empty array → []."""
+        assert find_internal_zero_blocks(np.array([])) == []
+
+    def test_all_zeros_no_blocks(self):
+        """All zeros → no valid onset/offset → []."""
+        assert find_internal_zero_blocks(np.zeros(10)) == []
+
+    def test_leading_zeros_excluded(self):
+        """Leading zeros are not internal → []."""
+        ts = np.array([0.0, 0.0, 1.0, 2.0, 3.0])
+        assert find_internal_zero_blocks(ts) == []
+
+    def test_trailing_zeros_excluded(self):
+        """Trailing zeros are not internal → []."""
+        ts = np.array([1.0, 2.0, 3.0, 0.0, 0.0])
+        assert find_internal_zero_blocks(ts) == []
+
+    def test_single_internal_zero(self):
+        """One internal zero → one (start, end) tuple."""
+        ts = np.array([1.0, 0.0, 2.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 1)]
+
+    def test_internal_block_of_three(self):
+        """[1, 0, 0, 0, 2] → block covering indices 1–3."""
+        ts = np.array([1.0, 0.0, 0.0, 0.0, 2.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 3)]
+
+    def test_two_separate_internal_blocks(self):
+        """Two disjoint zero blocks → two tuples in order."""
+        ts = np.array([1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 3.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 2), (4, 5)]
+
+    def test_nan_mid_block_detected(self):
+        """NaN inside window is treated as bad."""
+        ts = np.array([1.0, np.nan, 2.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 1)]
+
+    def test_inf_mid_block_detected(self):
+        """inf is not finite → treated as bad."""
+        ts = np.array([1.0, np.inf, 2.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 1)]
+
+    def test_mixed_nan_zero_block_is_one_block(self):
+        """Contiguous NaN and zero values form a single block."""
+        ts = np.array([1.0, np.nan, 0.0, np.nan, 2.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 3)]
+
+    def test_negative_values_not_flagged(self):
+        """Negative timestamps are valid (nonzero + finite) — not flagged."""
+        ts = np.array([1.0, -1.0, 0.0, 2.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(2, 2)]
+
+    def test_single_valid_sample_no_interior(self):
+        """[0, 5, 0] → onset == offset, no interior window → []."""
+        ts = np.array([0.0, 5.0, 0.0])
+        assert find_internal_zero_blocks(ts) == []
+
+    def test_two_valid_samples_no_interior(self):
+        """[1, 2] → window_start >= window_end → []."""
+        ts = np.array([1.0, 2.0])
+        assert find_internal_zero_blocks(ts) == []
+
+    def test_block_at_onset_plus_one(self):
+        """Zero immediately after onset is detected."""
+        ts = np.array([1.0, 0.0, 2.0, 3.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 1)]
+
+    def test_block_at_offset_minus_one(self):
+        """Zero immediately before offset is detected."""
+        ts = np.array([1.0, 2.0, 0.0, 3.0])
+        result = find_internal_zero_blocks(ts)
+        assert result == [(2, 2)]
+
+    def test_integer_dtype_no_raise(self):
+        """Integer dtype input works without raising."""
+        ts = np.array([1, 0, 2], dtype=int)
+        result = find_internal_zero_blocks(ts)
+        assert result == [(1, 1)]
+
+    def test_returns_list_of_tuples(self):
+        """Return type is list[tuple[int, int]]."""
+        ts = np.array([1.0, 0.0, 2.0])
+        result = find_internal_zero_blocks(ts)
+        assert isinstance(result, list)
+        assert all(isinstance(t, tuple) and len(t) == 2 for t in result)
+
+    def test_each_block_start_le_end(self):
+        """Every returned (start, end) has start <= end."""
+        ts = np.array([1.0, 0.0, 0.0, 2.0, 0.0, 3.0])
+        for start, end in find_internal_zero_blocks(ts):
+            assert start <= end

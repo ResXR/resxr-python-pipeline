@@ -11,7 +11,7 @@ import numpy as np
 from ...core.config import ValidationConfig
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
-from ...utils import find_recording_offset_index, find_recording_onset_index
+from ...utils import find_first_nonzero_index, find_last_nonzero_index
 from ..registry import register_check
 
 logger = get_logger(__name__)
@@ -54,8 +54,8 @@ class SamplingRateCheck:
             return flags
         timestamps = df["timeSinceStartup"].values
 
-        onset_idx = find_recording_onset_index(timestamps)
-        offset_idx = find_recording_offset_index(timestamps)
+        onset_idx = find_first_nonzero_index(timestamps)
+        offset_idx = find_last_nonzero_index(timestamps)
         if onset_idx is None or offset_idx is None or onset_idx > offset_idx:
             return flags
 

@@ -14,7 +14,7 @@ Provides two independent preprocessing stages:
    and strips the originals from the output DataFrame:
 
    - ``timestamp`` → ``latency``: per-system seconds from recording onset
-     (first non-zero timestamp via ``find_recording_onset_index``).
+     (first non-zero timestamp via ``find_first_nonzero_index``).
    - ``timeSinceStartup`` → ``latency_global``: global Unity clock seconds
      from recording onset.  Only present when the stream uses an alternate
      per-system time column (configured in ``alternate_time_columns``).
@@ -42,7 +42,7 @@ import pandas as pd
 
 from ..core.logger import get_logger
 from ..core.session import TrackingStream
-from ..utils import find_recording_offset_index, find_recording_onset_index
+from ..utils import find_first_nonzero_index, find_last_nonzero_index
 
 logger = get_logger(__name__)
 
@@ -221,7 +221,7 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
       stream uses an alternate time column and the original global
       ``timestamp`` was preserved as ``timeSinceStartup`` by the splitter).
 
-    Recording onset is determined by ``find_recording_onset_index``
+    Recording onset is determined by ``find_first_nonzero_index``
     (first finite non-zero value).  Rows before onset are set to
     ``np.nan`` since no valid timing exists yet.
 
@@ -242,8 +242,8 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
 
     if "timestamp" in out.columns and len(out) > 0:
         ts_vals = out["timestamp"].values
-        onset_idx = find_recording_onset_index(ts_vals)
-        offset_idx = find_recording_offset_index(ts_vals)
+        onset_idx = find_first_nonzero_index(ts_vals)
+        offset_idx = find_last_nonzero_index(ts_vals)
         onset = float(ts_vals[onset_idx]) if onset_idx is not None else 0.0
 
         latency = out["timestamp"] - onset
@@ -257,8 +257,8 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
 
     if "timeSinceStartup" in out.columns and len(out) > 0:
         tsu_vals = out["timeSinceStartup"].values
-        global_onset_idx = find_recording_onset_index(tsu_vals)
-        global_offset_idx = find_recording_offset_index(tsu_vals)
+        global_onset_idx = find_first_nonzero_index(tsu_vals)
+        global_offset_idx = find_last_nonzero_index(tsu_vals)
         global_onset = float(tsu_vals[global_onset_idx]) if global_onset_idx is not None else 0.0
 
         latency_global = out["timeSinceStartup"] - global_onset
