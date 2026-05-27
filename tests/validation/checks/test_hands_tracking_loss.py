@@ -323,12 +323,12 @@ class TestHandsTrackingLossClockDropout:
         left_flags = [f for f in flags if f.group_name == "left_hand"]
         assert len(left_flags) >= 1
         for f in left_flags:
-            assert f.start_time > 0, "Flag boundaries must use timeSinceStartup, not zeroed timestamp"
+            assert f.start_time > 0, (
+                "Flag boundaries must use timeSinceStartup, not zeroed timestamp"
+            )
             assert f.start_time <= f.end_time
 
-    def test_missing_timeSinceStartup_returns_empty_and_logs_error(
-        self, full_session, caplog
-    ):
+    def test_missing_timeSinceStartup_returns_empty_and_logs_error(self, full_session, caplog):
         """If timeSinceStartup is absent the check must return [] and log an error."""
         import logging
 

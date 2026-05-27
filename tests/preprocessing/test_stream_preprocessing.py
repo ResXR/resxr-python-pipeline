@@ -326,9 +326,7 @@ class TestApplyQualityMasking:
         assert result.loc[0:29, "Node_Head_px"].notna().all()
         assert result.loc[35:, "Node_Head_px"].notna().all()
 
-    def test_missing_timeSinceStartup_returns_unmasked_data_and_logs_error(
-        self, caplog
-    ):
+    def test_missing_timeSinceStartup_returns_unmasked_data_and_logs_error(self, caplog):
         """If timeSinceStartup is absent, masking logs an error and returns data unchanged."""
         import logging
 
