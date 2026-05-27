@@ -13,7 +13,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from ..utils import find_recording_offset_index, find_recording_onset, find_recording_onset_index
+from ..utils import find_first_nonzero_index, find_last_nonzero_index, find_recording_onset
 from .constants import TrackingSystem
 from .logger import get_logger
 
@@ -113,8 +113,8 @@ class QualityFlag:
 
         # Restrict the mask to the valid recording window (onset → offset)
         # so that leading/trailing zero rows never produce flags.
-        onset_idx = find_recording_onset_index(timestamps)
-        offset_idx = find_recording_offset_index(timestamps)
+        onset_idx = find_first_nonzero_index(timestamps)
+        offset_idx = find_last_nonzero_index(timestamps)
         if onset_idx is None or offset_idx is None:
             return []
         if onset_idx > 0 or offset_idx < len(boolean_mask) - 1:

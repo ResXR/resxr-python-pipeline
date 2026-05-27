@@ -122,6 +122,7 @@ validation:
     - sampling_rate
     - stats_summary
     - eyes_closed
+    - clock_dropout
 
   # Column groups for column-scoped validation checks.
   # Each group defines a named set of columns; checks decide how to use them.
