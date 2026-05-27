@@ -5,14 +5,11 @@ Produces a dashboard-style quality report.
 
 Time display:
 
-    Quality flags internally store times in per-system ``timestamp``
-    space (which may be an alternate per-system clock, not the global
-    Unity clock).  For the report, all flag times are converted to the
-    global ``timeSinceStartup`` clock via ``np.interp`` and then
-    expressed relative to the global recording onset (first non-zero
-    ``timeSinceStartup`` across all streams).  This gives a single
-    shared timeline starting from 0 so events across different tracking
-    systems are directly comparable.
+    Quality flags store times in ``timeSinceStartup`` space (the global
+    Unity clock).  For the report, flag times are expressed relative to
+    the global recording onset (earliest non-zero ``timeSinceStartup``
+    across all streams), giving a single shared timeline starting from 0
+    so events across different tracking systems are directly comparable.
 """
 
 from __future__ import annotations
@@ -21,7 +18,6 @@ import html
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader
@@ -180,23 +176,13 @@ class ReportGenerator:
     @staticmethod
     def _flags_relative_to_onset(session: Session) -> list[dict]:
         """
-        Convert quality flag times to global time relative to recording onset.
-        Quality flags internally store times in per-system ``timestamp``
-        space (which may be an alternate per-system clock such as
-        ``Node_HandLeft_Time``).  To present a single shared timeline in
-        the report:
+        Express quality flag times relative to the global recording onset.
 
-        1. **Global onset** — the earliest ``find_recording_onset`` across
-           all streams' ``timeSinceStartup`` columns (the Unity global
-           clock).  If a stream is missing ``timeSinceStartup``, a warning
-           is logged (no fallback; ``timeSinceStartup`` is the single
-           source of truth for cross-system time).
-
-        2. **Per-flag conversion** — for each flag, ``np.interp`` maps
-           the per-system start/end times to the global
-           ``timeSinceStartup`` axis, then subtracts the global onset.
-           This makes all flag times comparable across systems and
-           starting from 0.
+        Quality flags store times in ``timeSinceStartup`` space (the global
+        Unity clock).  The global onset is the earliest non-zero
+        ``timeSinceStartup`` across all streams.  Each flag's start/end is
+        shifted by subtracting that onset, producing a shared timeline that
+        starts at 0 and is comparable across all tracking systems.
 
         Returns a list of dicts consumed by the Jinja2 HTML template.
         """
@@ -223,25 +209,9 @@ class ReportGenerator:
 
         flags = []
         for flag in session.all_flags:
-            stream = session.streams.get(flag.system)
+            # Flags store timeSinceStartup values directly — subtract global onset.
             start_global = flag.start_time
             end_global = flag.end_time
-
-            # Convert per-system time → global time when timeSinceStartup exists
-            if (
-                stream is not None
-                and "timeSinceStartup" in stream.data.columns
-                and "timestamp" in stream.data.columns
-            ):
-                ts = stream.data["timestamp"].values
-                gs = stream.data["timeSinceStartup"].values
-                # Per-system clocks may not be monotonic; np.interp
-                # requires sorted xp, so sort both arrays together.
-                sort_idx = np.argsort(ts)
-                ts_sorted = ts[sort_idx]
-                gs_sorted = gs[sort_idx]
-                start_global = float(np.interp(flag.start_time, ts_sorted, gs_sorted))
-                end_global = float(np.interp(flag.end_time, ts_sorted, gs_sorted))
 
             flags.append(
                 {

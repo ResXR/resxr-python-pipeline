@@ -51,6 +51,15 @@ class HandsTrackingLossCheck:
             },
         )
 
+        if "timeSinceStartup" not in df.columns:
+            logger.error(
+                f"{stream.system.value}: timeSinceStartup column missing — "
+                "cannot create hands_tracking_loss flags. "
+                "Check alternate_time_columns in pipeline_config.yaml."
+            )
+            return flags
+        ts_for_flags = df["timeSinceStartup"].values
+
         for hand, columns in tracking_flags.items():
             for column in columns:
                 if column in df.columns:
@@ -58,7 +67,7 @@ class HandsTrackingLossCheck:
                     if tracking_lost.any():
                         flags.extend(
                             QualityFlag.from_mask(
-                                timestamps=df["timestamp"].values,
+                                timestamps=ts_for_flags,
                                 boolean_mask=tracking_lost.values,
                                 check_name=self.name,
                                 system=stream.system,

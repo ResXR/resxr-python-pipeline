@@ -34,6 +34,7 @@ def _make_stream(
     df = pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "Node_Head_px": np.zeros(n),
         }
     )
@@ -53,6 +54,7 @@ def _make_irregular_stream(n: int = 100, nominal_rate: float = 90.0) -> Tracking
     df = pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "Node_Head_px": np.zeros(n),
         }
     )
@@ -228,9 +230,11 @@ class TestSamplingRateEdgeCases:
 
     def test_trailing_zero_timestamps_do_not_create_invalid_interval(self, full_session):
         """Trailing zeros should not produce a start_time > end_time flag interval."""
+        ts = np.array([0.0, 1.0, 2.0, 3.0, 0.0, 0.0])
         df = pd.DataFrame(
             {
-                "timestamp": np.array([0.0, 1.0, 2.0, 3.0, 0.0, 0.0]),
+                "timestamp": ts,
+                "timeSinceStartup": ts,
                 "Node_Head_px": np.zeros(6),
             }
         )

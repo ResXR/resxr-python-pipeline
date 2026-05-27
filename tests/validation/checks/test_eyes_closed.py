@@ -36,6 +36,7 @@ def _make_face_stream(
     df = pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "Eyes_Closed_L": left_values,
             "Eyes_Closed_R": right_values,
             "Jaw_Drop": np.zeros(n),
@@ -54,6 +55,7 @@ def _make_eyes_stream(n: int = 100, rate: float = 90.0) -> TrackingStream:
     df = pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "LeftEye_px": np.zeros(n),
             "LeftEye_py": np.zeros(n),
         }
