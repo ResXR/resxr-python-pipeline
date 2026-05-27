@@ -10,8 +10,11 @@ import numpy as np
 
 from ...core.config import ValidationConfig
 from ...core.constants import TrackingSystem
+from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ..registry import register_check
+
+logger = get_logger(__name__)
 
 
 class EyesClosedCheck:
@@ -62,9 +65,15 @@ class EyesClosedCheck:
         if col_left in df.columns and col_right in df.columns:
             closed_mask = (df[col_left] >= threshold) & (df[col_right] >= threshold)
             if closed_mask.any():
-                timestamps = df["timestamp"].values
+                if "timeSinceStartup" not in df.columns:
+                    logger.error(
+                        "FACE: timeSinceStartup column missing — "
+                        "cannot create eyes_closed flags. "
+                        "Check alternate_time_columns in pipeline_config.yaml."
+                    )
+                    return flags
                 face_flags = QualityFlag.from_mask(
-                    timestamps=timestamps,
+                    timestamps=df["timeSinceStartup"].values,
                     boolean_mask=closed_mask.values,
                     check_name=self.name,
                     system=TrackingSystem.FACE,
@@ -81,26 +90,33 @@ class EyesClosedCheck:
 
         # Propagate mask to EYES stream for optional gaze filtering
         if eyes_stream is not None and not eyes_stream.data.empty and closed_segments:
-            eyes_timestamps = eyes_stream.data["timestamp"].values
-            eyes_closed_mask_for_eyes_stream = np.zeros_like(eyes_timestamps, dtype=bool)
-            for seg_start, seg_end in closed_segments:
-                eyes_closed_mask_for_eyes_stream |= (eyes_timestamps >= seg_start) & (
-                    eyes_timestamps <= seg_end
+            if "timeSinceStartup" not in eyes_stream.data.columns:
+                logger.error(
+                    "EYES: timeSinceStartup column missing — "
+                    "cannot propagate eyes_closed flags to Eyes stream. "
+                    "Check alternate_time_columns in pipeline_config.yaml."
                 )
-            if eyes_closed_mask_for_eyes_stream.any():
-                flags.extend(
-                    QualityFlag.from_mask(
-                        timestamps=eyes_timestamps,
-                        boolean_mask=eyes_closed_mask_for_eyes_stream,
-                        check_name=self.name,
-                        system=TrackingSystem.EYES,
-                        severity="info",
-                        message="Eyes closed (from FACE stream)",
-                        should_mask=True,
-                        group_name="both_eyes",
-                        target_columns=[],
+            else:
+                eyes_ts = eyes_stream.data["timeSinceStartup"].values
+                eyes_closed_mask_for_eyes_stream = np.zeros_like(eyes_ts, dtype=bool)
+                for seg_start, seg_end in closed_segments:
+                    eyes_closed_mask_for_eyes_stream |= (eyes_ts >= seg_start) & (
+                        eyes_ts <= seg_end
                     )
-                )
+                if eyes_closed_mask_for_eyes_stream.any():
+                    flags.extend(
+                        QualityFlag.from_mask(
+                            timestamps=eyes_ts,
+                            boolean_mask=eyes_closed_mask_for_eyes_stream,
+                            check_name=self.name,
+                            system=TrackingSystem.EYES,
+                            severity="info",
+                            message="Eyes closed (from FACE stream)",
+                            should_mask=True,
+                            group_name="both_eyes",
+                            target_columns=[],
+                        )
+                    )
 
         return flags
 

@@ -37,6 +37,7 @@ def _make_hands_stream(
     df = pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "LeftHand_Root_px": np.zeros(n),
             "RightHand_Root_px": np.zeros(n),
             "LeftHand_Status_HandTracked": left_tracked,
@@ -205,6 +206,7 @@ class TestHandsTrackingLossDetection:
         df = pd.DataFrame(
             {
                 "timestamp": ts,
+                "timeSinceStartup": ts,
                 "LeftHand_Root_px": np.zeros(100),
                 "RightHand_Root_px": np.zeros(100),
                 "LeftHand_Status_HandTracked": left,
@@ -248,6 +250,7 @@ class TestHandsTrackingLossConfigurable:
         df = pd.DataFrame(
             {
                 "timestamp": ts,
+                "timeSinceStartup": ts,
                 "MyCustomValidity": validity,
             }
         )
@@ -269,6 +272,7 @@ class TestHandsTrackingLossConfigurable:
         df = pd.DataFrame(
             {
                 "timestamp": ts,
+                "timeSinceStartup": ts,
                 "LeftHand_Root_px": np.zeros(n),
                 # Missing LeftHand_Status_HandTracked and RightHand_Status_HandTracked
             }
@@ -282,3 +286,69 @@ class TestHandsTrackingLossConfigurable:
         config = _make_config()  # default columns not present
         flags = check(stream, full_session, config)
         assert flags == []
+
+
+# ===========================================================================
+# Clock dropout (core bug regression)
+# ===========================================================================
+
+
+class TestHandsTrackingLossClockDropout:
+    def test_per_system_clock_dropout_does_not_crash(self, full_session):
+        """Per-system timestamp drops to 0 mid-recording; timeSinceStartup keeps ticking.
+        This is the exact hardware dropout scenario that previously caused
+        start_time > end_time in QualityFlag.__post_init__."""
+        n = 100
+        ts_per_system = make_timestamps(n, 90.0, 1.0)
+        ts_global = make_timestamps(n, 90.0, 1.0)
+        ts_per_system[30:35] = 0.0  # hardware dropout: per-system clock zeroes out
+
+        left = np.ones(n, dtype=int)
+        left[30:35] = 0  # tracking lost during dropout rows
+
+        df = pd.DataFrame(
+            {
+                "timestamp": ts_per_system,
+                "timeSinceStartup": ts_global,
+                "LeftHand_Status_HandTracked": left,
+                "RightHand_Status_HandTracked": np.ones(n, dtype=int),
+            }
+        )
+        stream = TrackingStream(system=TrackingSystem.HANDS, data=df, sampling_frequency=90.0)
+
+        check = HandsTrackingLossCheck()
+        config = _make_config()
+        flags = check(stream, full_session, config)  # must not raise
+
+        left_flags = [f for f in flags if f.group_name == "left_hand"]
+        assert len(left_flags) >= 1
+        for f in left_flags:
+            assert f.start_time > 0, (
+                "Flag boundaries must use timeSinceStartup, not zeroed timestamp"
+            )
+            assert f.start_time <= f.end_time
+
+    def test_missing_timeSinceStartup_returns_empty_and_logs_error(self, full_session, caplog):
+        """If timeSinceStartup is absent the check must return [] and log an error."""
+        import logging
+
+        n = 50
+        ts = make_timestamps(n, 90.0, 1.0)
+        left = np.zeros(n, dtype=int)  # all tracking lost
+        df = pd.DataFrame(
+            {
+                "timestamp": ts,
+                # NO timeSinceStartup column
+                "LeftHand_Status_HandTracked": left,
+                "RightHand_Status_HandTracked": np.ones(n, dtype=int),
+            }
+        )
+        stream = TrackingStream(system=TrackingSystem.HANDS, data=df, sampling_frequency=90.0)
+
+        check = HandsTrackingLossCheck()
+        config = _make_config()
+        with caplog.at_level(logging.ERROR):
+            flags = check(stream, full_session, config)
+
+        assert flags == []
+        assert "timeSinceStartup" in caplog.text

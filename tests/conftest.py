@@ -47,6 +47,7 @@ def _head_df(n: int = 200) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "Node_Head_px": rng.normal(0.0, 0.1, n),
             "Node_Head_py": rng.normal(1.5, 0.05, n),
             "Node_Head_pz": rng.normal(0.0, 0.1, n),
@@ -63,6 +64,7 @@ def _hands_df(n: int = 200, with_validity: bool = True) -> pd.DataFrame:
     ts = make_timestamps(n, 90.0, 1.0)
     data: dict = {
         "timestamp": ts,
+        "timeSinceStartup": ts,
         "LeftHand_Root_px": rng.normal(0.3, 0.05, n),
         "LeftHand_Root_py": rng.normal(1.0, 0.05, n),
         "RightHand_Root_px": rng.normal(-0.3, 0.05, n),
@@ -80,6 +82,7 @@ def _eyes_df(n: int = 200) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "LeftEye_px": rng.normal(0.0, 0.01, n),
             "LeftEye_py": rng.normal(0.0, 0.01, n),
         }
@@ -92,6 +95,7 @@ def _face_df(n: int = 200) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "timestamp": ts,
+            "timeSinceStartup": ts,
             "Eyes_Closed_L": rng.uniform(0.0, 0.1, n),
             "Eyes_Closed_R": rng.uniform(0.0, 0.1, n),
             "Jaw_Drop": rng.uniform(0.0, 0.3, n),
