@@ -26,6 +26,7 @@ from .splitter import (
     split_continuous_data,
 )
 from .writers import (
+    copy_sourcedata,
     write_bids_events,
     write_bids_tsv,
     write_channels_tsv,
@@ -54,6 +55,7 @@ __all__ = [
     "split_continuous_data",
     "is_system_enabled",
     # Writers
+    "copy_sourcedata",
     "write_bids_tsv",
     "write_bids_events",
     "write_json",
