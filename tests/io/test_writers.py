@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 from resxr.io.writers import (
-    write_bids_events,
     write_bids_tsv,
     write_channels_tsv,
     write_json,
@@ -256,54 +255,59 @@ class TestWriteParticipantsTsv:
 
 
 class TestWriteBidsEvents:
-    def test_creates_tsv_file(self, tmp_path):
-        """write_bids_events creates the events.tsv file."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        assert path.exists()
-
-    def test_creates_json_sidecar(self, tmp_path):
-        """write_bids_events also creates a _events.json sidecar."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        assert (tmp_path / "events.json").exists()
-
-    def test_required_columns_present(self, tmp_path):
-        """Written TSV has onset, duration, and name columns."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        df = pd.read_csv(path, sep="\t")
-        for col in ("name", "onset", "duration"):
-            assert col in df.columns
-
-    def test_bids_required_columns_are_first(self, tmp_path):
-        """BIDS requires onset first and duration second in events.tsv."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        df = pd.read_csv(path, sep="\t")
-        assert list(df.columns[:3]) == ["onset", "duration", "name"]
-
-    def test_missing_required_column_raises(self, tmp_path):
-        """DataFrame missing 'onset' column raises BIDSWriteError."""
-        from resxr.core.exceptions import BIDSWriteError
-
-        bad_df = pd.DataFrame({"name": ["evt"], "duration": [1.0]})
-        with pytest.raises(BIDSWriteError):
-            write_bids_events(bad_df, tmp_path / "events.tsv")
-
-    def test_events_sorted_by_onset(self, tmp_path):
-        """Events in the output file are sorted by onset time."""
-        df = pd.DataFrame(
+    def _wide(self):
+        return pd.DataFrame(
             {
-                "name": ["c", "a", "b"],
-                "onset": [10.0, 0.0, 5.0],
-                "duration": [0.0, 0.0, 0.0],
+                "onset": [0.0, 5.0],
+                "duration": [0.0, 1.0],
+                "name": ["start", "ChoiceEvent"],
+                "reaction_time": ["n/a", 0.3],
             }
         )
+
+    def _sidecar(self):
+        return {"onset": {"Units": "s"}, "name": {"Description": "Event"}}
+
+    def test_writes_tsv_and_json(self, tmp_path):
+        from resxr.io.writers import write_bids_events
+
         path = tmp_path / "events.tsv"
-        write_bids_events(df, path)
-        df_read = pd.read_csv(path, sep="\t")
-        assert list(df_read["onset"]) == sorted(df_read["onset"])
+        write_bids_events(self._wide(), path, self._sidecar())
+        assert path.exists()
+        assert (tmp_path / "events.json").exists()
+
+    def test_extra_columns_not_dropped(self, tmp_path):
+        from resxr.io.writers import write_bids_events
+
+        path = tmp_path / "events.tsv"
+        write_bids_events(self._wide(), path, self._sidecar())
+        df = pd.read_csv(path, sep="\t")
+        assert "reaction_time" in df.columns
+        assert "name" in df.columns
+        assert "trial_type" not in df.columns
+
+    def test_sidecar_content_matches(self, tmp_path):
+        import json as _json
+
+        from resxr.io.writers import write_bids_events
+
+        path = tmp_path / "events.tsv"
+        write_bids_events(self._wide(), path, self._sidecar())
+        assert _json.loads((tmp_path / "events.json").read_text()) == self._sidecar()
+
+    def test_missing_required_column_raises(self, tmp_path):
+        from resxr.core.exceptions import BIDSWriteError
+        from resxr.io.writers import write_bids_events
+
+        bad = pd.DataFrame({"name": ["x"], "duration": [1.0]})
+        with pytest.raises(BIDSWriteError):
+            write_bids_events(bad, tmp_path / "events.tsv", {})
+
+    def test_non_tsv_path_raises_valueerror(self, tmp_path):
+        from resxr.io.writers import write_bids_events
+
+        with pytest.raises(ValueError):
+            write_bids_events(self._wide(), tmp_path / "events.csv", {})
 
 
 # ===========================================================================

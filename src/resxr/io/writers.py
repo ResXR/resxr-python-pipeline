@@ -182,73 +182,32 @@ def write_scans_tsv(df: pd.DataFrame, path: Path) -> None:
 def write_bids_events(
     events_df: pd.DataFrame,
     output_path: Path,
+    sidecar: dict,
 ) -> None:
-    """
-    Write events data to BIDS-compliant events.tsv file.
-
-    Parameters
-    ----------
-    events_df : pd.DataFrame
-        Events data with columns: onset, duration, name
-    output_path : Path
-        Path to output events.tsv file
-
-    Raises
-    ------
-    BIDSWriteError
-        If file or JSON sidecar cannot be written or validation fails
-    """
+    """Write a finished wide events frame + its sidecar. Dumb writer: no
+    column assembly, no dropping. Caller supplies both."""
     output_path = Path(output_path)
+    if output_path.suffix != ".tsv":
+        raise ValueError(f"events output_path must end in .tsv, got: {output_path}")
 
-    required_cols = ["onset", "duration", "name"]
-    missing = [c for c in required_cols if c not in events_df.columns]
+    required = ["onset", "duration", "name"]
+    missing = [c for c in required if c not in events_df.columns]
     if missing:
         raise BIDSWriteError(f"Events DataFrame missing required columns: {missing}")
 
-    events_df = events_df.copy()
-    events_df = events_df.sort_values("onset")
-
-    extra_cols = [c for c in events_df.columns if c not in required_cols]
-    if extra_cols:
-        logger.warning(
-            "Events DataFrame has extra columns that will be dropped: %s",
-            extra_cols,
-        )
-    events_df = events_df[required_cols]
-
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        events_df.to_csv(
-            output_path,
-            sep="\t",
-            index=False,
-            na_rep="n/a",
-        )
+        events_df.to_csv(output_path, sep="\t", index=False, na_rep="n/a")
         logger.debug(f"Wrote events.tsv: {output_path}")
     except Exception as e:
         raise BIDSWriteError(f"Failed to write events TSV {output_path}: {e}") from e
 
-    # Write JSON sidecar
-    events_json_path = output_path.with_suffix(".json")
-    events_metadata = {
-        "onset": {
-            "Description": "Onset time of event in seconds relative to recording start",
-            "Units": "s",
-        },
-        "duration": {
-            "Description": "Duration of event in seconds (0 for instantaneous events)",
-            "Units": "s",
-        },
-        "name": {
-            "Description": "Type or name of the event",
-            "LongName": "Event Type",
-        },
-    }
-
+    json_path = output_path.with_suffix(".json")
     try:
-        with open(events_json_path, "w", encoding="utf-8") as f:
-            json.dump(events_metadata, f, indent=2)
-        logger.debug(f"Wrote events.json: {events_json_path}")
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(sidecar, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        logger.debug(f"Wrote events.json: {json_path}")
     except Exception as e:
         raise BIDSWriteError(f"Failed to write events JSON sidecar: {e}") from e
 

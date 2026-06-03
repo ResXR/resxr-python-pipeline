@@ -22,6 +22,7 @@ from pathlib import Path
 import pandas as pd
 
 from .bids.channels import generate_channels_tsv
+from .bids.events_merge import generate_events_sidecar, merge_events
 from .bids.layout import BIDSLayout
 from .bids.metadata import (
     generate_channels_json,
@@ -37,6 +38,7 @@ from .core.session import Session
 from .io.readers import discover_sessions, load_session
 from .io.splitter import split_continuous_data
 from .io.writers import (
+    copy_sourcedata,
     write_bids_events,
     write_channels_tsv,
     write_json,
@@ -164,6 +166,13 @@ def process_session_from_mapping(
     session.subject_id = mapping.subject_id
     session.session_label = mapping.session_label
 
+    # Copy the raw session verbatim into sourcedata/ before any transformation.
+    copy_sourcedata(
+        Path(source_dir),
+        bids.sourcedata_session_dir(session),
+        overwrite=config.output.overwrite,
+    )
+
     # Split into tracking streams
     session.streams = split_continuous_data(
         session,
@@ -183,6 +192,8 @@ def process_session_from_mapping(
         flags = check_registry.run_all(stream, session, config.validation)
         stream.quality_flags = flags
         logger.info(f"  Found {len(flags)} quality flags")
+
+    session.merged_events_data = merge_events(session.raw_events_data, session.custom_tables_data)
 
     # Write RAW BIDS output (original data)
     logger.info("Writing RAW BIDS dataset (original)...")
@@ -290,15 +301,20 @@ def write_bids_output(
         scans_df = pd.DataFrame(scans_entries)
         write_scans_tsv(scans_df, scans_path)
 
-    # Write events.tsv and sidecar for raw dataset if events are present.
-    if not derivative and session.raw_events_data is not None:
-        events_dir = bids.get_motion_dir(session, derivative=False)
+    # Merged wide events at the SESSION ROOT (not motion/) — raw tier only.
+    if (
+        not derivative
+        and session.merged_events_data is not None
+        and not session.merged_events_data.empty
+    ):
+        events_dir = bids.get_session_dir(session)
         events_dir.mkdir(parents=True, exist_ok=True)
-        events_path = (
-            events_dir
-            / f"sub-{session.subject_id}_ses-{session.session_label}_task-{config.output.task_name}_events.tsv"
+        events_path = events_dir / (
+            f"sub-{session.subject_id}_ses-{session.session_label}"
+            f"_task-{config.output.task_name}_events.tsv"
         )
-        write_bids_events(session.raw_events_data, events_path)
+        sidecar = generate_events_sidecar(session.merged_events_data, session.custom_tables)
+        write_bids_events(session.merged_events_data, events_path, sidecar)
         logger.info(f"Wrote events: {events_path.name}")
 
 
