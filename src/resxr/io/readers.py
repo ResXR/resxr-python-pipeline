@@ -454,6 +454,25 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
                 "unparseable. Events sidecar will not describe custom columns.",
                 session_dir,
             )
+        else:
+            # Report schema/CSV inconsistencies as log warnings (no validation check).
+            for schema in custom_tables:
+                df = custom_tables_data.get(schema.class_name)
+                if df is None:
+                    logger.warning(
+                        "custom_tables.json declares class '%s' but no matching CSV was "
+                        "loaded in %s.",
+                        schema.class_name,
+                        session_dir,
+                    )
+                elif schema.row_count != len(df):
+                    logger.warning(
+                        "Custom class '%s' row_count %d does not match CSV row count %d in %s.",
+                        schema.class_name,
+                        schema.row_count,
+                        len(df),
+                        session_dir,
+                    )
 
     # Create session
     session = Session(

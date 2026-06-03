@@ -473,3 +473,74 @@ class TestDiscoverSessions:
         (d / "session_metadata.json").write_text(json.dumps({"session_id": "s1"}))
         sessions = discover_sessions(self._input_config(data_dir))
         assert all(isinstance(p, Path) for p in sessions)
+
+
+# ===========================================================================
+# load_session — custom-table consistency logging (no validation check)
+# ===========================================================================
+
+
+class TestLoadSessionCustomTableLogging:
+    def _config(self, data_dir: Path) -> InputConfig:
+        return InputConfig(
+            data_dir=data_dir,
+            continuous_data_pattern="*_ContinuousData.csv",
+            face_data_pattern="*_FaceExpressionData.csv",
+            metadata_pattern="session_metadata.json",
+            events_data_pattern="*_EventsData.csv",
+            custom_table_patterns=["*ChoiceEvent.csv"],
+        )
+
+    def _session_dir(self, tmp_path: Path, choice_rows: int, tables_json: str) -> Path:
+        d = tmp_path / "sess"
+        d.mkdir()
+        (d / "session_metadata.json").write_text(json.dumps({"session_id": "sess"}))
+        pd.DataFrame({"timeSinceStartup": [1.0, 1.1], "Node_Head_px": [0.1, 0.2]}).to_csv(
+            d / "sess_ContinuousData.csv", index=False
+        )
+        pd.DataFrame(
+            {"onset": [0.0, 1.0][:choice_rows], "duration": [0.0, 0.0][:choice_rows]}
+        ).to_csv(d / "sess_ChoiceEvent.csv", index=False)
+        (d / "custom_tables.json").write_text(tables_json)
+        return d
+
+    def test_row_count_mismatch_logs_warning(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json='[{"class_name":"ChoiceEvent","row_count":5,"columns":[]}]',
+        )
+        with caplog.at_level(logging.WARNING):
+            load_session(d, self._config(tmp_path))
+        assert "row_count" in caplog.text
+
+    def test_declared_class_without_csv_logs_warning(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json=(
+                '[{"class_name":"ChoiceEvent","row_count":1,"columns":[]},'
+                '{"class_name":"Ghost","row_count":2,"columns":[]}]'
+            ),
+        )
+        with caplog.at_level(logging.WARNING):
+            load_session(d, self._config(tmp_path))
+        assert "Ghost" in caplog.text
+        assert "no matching CSV" in caplog.text
+
+    def test_consistent_schema_no_warning(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json='[{"class_name":"ChoiceEvent","row_count":1,"columns":[]}]',
+        )
+        with caplog.at_level(logging.WARNING):
+            load_session(d, self._config(tmp_path))
+        assert "row_count" not in caplog.text
+        assert "no matching CSV" not in caplog.text
