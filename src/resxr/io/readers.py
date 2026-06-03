@@ -426,7 +426,16 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     custom_tables = None
     if custom_tables_data:
         json_matches = sorted(custom_dir.glob("*custom_tables.json"))
-        custom_tables = load_custom_tables_json(json_matches[0]) if json_matches else None
+        exact = custom_dir / "custom_tables.json"
+        json_path = exact if exact.exists() else (json_matches[0] if json_matches else None)
+        if len(json_matches) > 1:
+            logger.warning(
+                "Multiple files matching '*custom_tables.json' in %s (%s); using '%s'.",
+                custom_dir,
+                [p.name for p in json_matches],
+                json_path.name,
+            )
+        custom_tables = load_custom_tables_json(json_path) if json_path else None
         if custom_tables is None:
             logger.error(
                 "Custom class CSVs present in %s but custom_tables.json is missing or "

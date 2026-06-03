@@ -541,3 +541,19 @@ class TestLoadSessionCustomTableLogging:
             load_session(d, self._config(tmp_path))
         assert "row_count" not in caplog.text
         assert "no matching CSV" not in caplog.text
+
+    def test_multiple_custom_tables_json_prefers_exact_and_warns(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json='[{"class_name":"ChoiceEvent","row_count":1,"columns":[]}]',
+        )
+        # A stray file that sorts alphabetically before "custom_tables.json".
+        # If it were picked, parsing would fail and custom_tables would be None.
+        (d / "custom_tables" / "backup_custom_tables.json").write_text("not valid json")
+        with caplog.at_level(logging.WARNING):
+            session = load_session(d, self._config(tmp_path))
+        assert session.custom_tables is not None  # exact custom_tables.json was used
+        assert "Multiple files matching" in caplog.text
