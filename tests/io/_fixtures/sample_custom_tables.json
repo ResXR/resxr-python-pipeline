@@ -1,0 +1,24 @@
+[
+  {
+    "class_name": "ChoiceEvent",
+    "row_count": 2,
+    "columns": [
+      {
+        "name": "reaction_time",
+        "description": "Reaction time",
+        "format": "float",
+        "units": "s",
+        "minimum": 0.0
+      },
+      {
+        "name": "choice",
+        "description": "Chosen option",
+        "format": "str",
+        "levels": {
+          "L": "left",
+          "R": "right"
+        }
+      }
+    ]
+  }
+]
