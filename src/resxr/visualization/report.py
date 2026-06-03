@@ -335,7 +335,7 @@ class ReportGenerator:
         shapes: list[dict] = []
 
         if has_events:
-            event_name_col = "trial_type" if "trial_type" in events_df.columns else "name"
+            event_name_col = "name"
             instant_events: list[tuple[float, str]] = []
             duration_events: list[tuple[float, float, str]] = []
 
