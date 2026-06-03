@@ -385,4 +385,3 @@ class TestSessionCustomTableFields:
         assert s.custom_tables is None
         assert s.custom_tables_data == {}
         assert s.merged_events_data is None
-        assert s.session_flags == []

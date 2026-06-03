@@ -374,10 +374,8 @@ class Session:
     # Custom data classes (parsed from custom_tables.json + their CSVs)
     custom_tables: list[CustomTableSchema] | None = None
     custom_tables_data: dict[str, pd.DataFrame] = field(default_factory=dict)
-    # Filled by merge_events (Step 4/7) just before BIDS events are written
+    # Filled by merge_events just before BIDS events are written
     merged_events_data: pd.DataFrame | None = None
-    # Session-level validation flags (populated by run_session_level, Step 8)
-    session_flags: list[QualityFlag] = field(default_factory=list)
 
     # Source paths for reference
     source_dir: str | None = None
