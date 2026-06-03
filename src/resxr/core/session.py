@@ -188,6 +188,32 @@ class QualityFlag:
 
 
 @dataclass
+class ColumnInfoEntry:
+    """One column's BIDS description, parsed from custom_tables.json.
+
+    `description` and `format` are always present. The rest are optional and
+    only populated when the source JSON includes them.
+    """
+
+    name: str
+    description: str
+    format: str  # BIDS "Format" field - always present
+    units: str | None = None  # numeric columns only
+    levels: dict[str, str] | None = None  # categorical columns only
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+@dataclass
+class CustomTableSchema:
+    """Schema for one custom data class, parsed from custom_tables.json."""
+
+    class_name: str
+    row_count: int
+    columns: list[ColumnInfoEntry]
+
+
+@dataclass
 class SessionMetadata:
     """
     Parsed session metadata from session_metadata.json.
@@ -344,6 +370,14 @@ class Session:
     raw_continuous_data: pd.DataFrame | None = None
     raw_face_data: pd.DataFrame | None = None
     raw_events_data: pd.DataFrame | None = None
+
+    # Custom data classes (parsed from custom_tables.json + their CSVs)
+    custom_tables: list[CustomTableSchema] | None = None
+    custom_tables_data: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Filled by merge_events (Step 4/7) just before BIDS events are written
+    merged_events_data: pd.DataFrame | None = None
+    # Session-level validation flags (populated by run_session_level, Step 8)
+    session_flags: list[QualityFlag] = field(default_factory=list)
 
     # Source paths for reference
     source_dir: str | None = None

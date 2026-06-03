@@ -34,6 +34,8 @@ from .exceptions import (
 )
 from .logger import get_logger, setup_logging
 from .session import (
+    ColumnInfoEntry,
+    CustomTableSchema,
     QualityFlag,
     Session,
     SessionMetadata,
@@ -52,6 +54,8 @@ __all__ = [
     "SessionMetadata",
     "TrackingStream",
     "QualityFlag",
+    "ColumnInfoEntry",
+    "CustomTableSchema",
     # Config
     "PipelineConfig",
     "InputConfig",

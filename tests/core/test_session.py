@@ -7,7 +7,13 @@ import pandas as pd
 import pytest
 
 from resxr.core.constants import TrackingSystem
-from resxr.core.session import QualityFlag, Session, TrackingStream
+from resxr.core.session import (
+    ColumnInfoEntry,
+    CustomTableSchema,
+    QualityFlag,
+    Session,
+    TrackingStream,
+)
 from tests.conftest import _head_df, make_timestamps
 
 # ===========================================================================
@@ -324,3 +330,59 @@ class TestSessionMetrics:
         """masked_percentage returns 0 when total_duration_seconds is 0."""
         session = Session(session_id="empty", metadata=session_metadata, streams={})
         assert session.masked_percentage == 0.0
+
+
+# ===========================================================================
+# Custom-tables data model (ColumnInfoEntry, CustomTableSchema, Session fields)
+# ===========================================================================
+
+
+class TestColumnInfoEntry:
+    def test_minimal_only_description_and_format(self):
+        """description and format are required; everything else defaults to None."""
+        c = ColumnInfoEntry(name="rt", description="Reaction time", format="float")
+        assert c.units is None
+        assert c.levels is None
+        assert c.minimum is None
+        assert c.maximum is None
+
+    def test_units_without_levels(self):
+        c = ColumnInfoEntry(name="rt", description="Reaction time", format="float", units="s")
+        assert c.units == "s"
+        assert c.levels is None
+
+    def test_levels_without_units(self):
+        c = ColumnInfoEntry(
+            name="resp", description="Response", format="str", levels={"L": "left", "R": "right"}
+        )
+        assert c.levels == {"L": "left", "R": "right"}
+        assert c.units is None
+
+    def test_minimum_and_maximum(self):
+        c = ColumnInfoEntry(
+            name="score", description="Score", format="float", minimum=0.0, maximum=1.0
+        )
+        assert c.minimum == 0.0
+        assert c.maximum == 1.0
+
+
+class TestCustomTableSchema:
+    def test_holds_columns(self):
+        schema = CustomTableSchema(
+            class_name="ChoiceEvent",
+            row_count=3,
+            columns=[ColumnInfoEntry(name="rt", description="Reaction time", format="float")],
+        )
+        assert schema.class_name == "ChoiceEvent"
+        assert schema.row_count == 3
+        assert len(schema.columns) == 1
+
+
+class TestSessionCustomTableFields:
+    def test_defaults(self):
+        """New Session fields default to empty/None and do not require arguments."""
+        s = Session(session_id="s1")
+        assert s.custom_tables is None
+        assert s.custom_tables_data == {}
+        assert s.merged_events_data is None
+        assert s.session_flags == []
