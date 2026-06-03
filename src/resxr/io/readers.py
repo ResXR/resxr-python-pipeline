@@ -7,7 +7,7 @@ Handles loading CSV tracking data and JSON metadata files.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -248,14 +248,12 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
 
 @dataclass
 class SessionFiles:
-    """Resolved paths for one session directory."""
+    """Resolved paths for one session directory's primary data files."""
 
     continuous: Path | None
     face: Path | None
     metadata: Path | None
     events: Path | None
-    custom_tables_json: Path | None = None
-    custom_csvs: dict[str, Path] = field(default_factory=dict)
 
 
 def load_custom_tables_json(json_path: Path) -> list[CustomTableSchema] | None:
@@ -298,34 +296,18 @@ def load_custom_tables_json(json_path: Path) -> list[CustomTableSchema] | None:
         return None
 
 
-def find_custom_class_csvs(
-    session_dir: Path,
-    session_id: str,
-    patterns: list[str],
-) -> dict[str, Path]:
-    """Resolve configured glob patterns to custom-class CSV paths.
+def find_custom_class_csvs(custom_dir: Path, recording_id: str) -> dict[str, Path]:
+    """Map each custom data-class CSV in *custom_dir* to its class name.
 
-    Config-driven: a file is included only if one of `patterns` matches it.
-    `session_id` is used solely to strip the per-session filename prefix when
-    deriving the class name. A pattern matching nothing logs a warning (likely a
-    typo, or a class that did not record this session) and is skipped.
+    The class name is the file stem with a leading ``"{recording_id}_"`` prefix
+    removed. Returns ``{}`` when *custom_dir* does not exist.
     """
+    if not custom_dir.is_dir():
+        return {}
     result: dict[str, Path] = {}
-    seen: set[Path] = set()
-    for pattern in patterns:
-        matches = sorted(session_dir.glob(pattern))
-        if not matches:
-            logger.warning(
-                "custom_table_patterns entry '%s' matched no file in %s", pattern, session_dir
-            )
-            continue
-        for path in matches:
-            if path in seen:
-                continue
-            seen.add(path)
-            stem = path.stem
-            class_name = stem.removeprefix(f"{session_id}_")
-            result[class_name] = path
+    for path in sorted(custom_dir.glob("*.csv")):
+        class_name = path.stem.removeprefix(f"{recording_id}_")
+        result[class_name] = path
     return result
 
 
@@ -374,7 +356,6 @@ def find_session_files(session_dir: Path, config: InputConfig) -> SessionFiles:
         face=_most_recent(config.face_data_pattern),
         metadata=_most_recent(config.metadata_pattern),
         events=_most_recent(config.events_data_pattern),
-        custom_tables_json=_most_recent("*custom_tables.json"),
     )
 
 
@@ -437,25 +418,22 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     if files.events is not None:
         raw_events = load_events_data(files.events)
 
-    # Custom data classes (config-driven; opt-in via custom_table_patterns)
-    custom_csvs = find_custom_class_csvs(
-        session_dir, metadata.session_id, config.custom_table_patterns
-    )
+    # Custom data classes: a dedicated subfolder holding custom_tables.json and CSVs.
+    custom_dir = session_dir / config.custom_tables_dir
+    custom_csvs = find_custom_class_csvs(custom_dir, metadata.session_id)
     custom_tables_data = {name: load_custom_class_csv(p) for name, p in custom_csvs.items()}
 
     custom_tables = None
     if custom_tables_data:
-        custom_tables = (
-            load_custom_tables_json(files.custom_tables_json) if files.custom_tables_json else None
-        )
+        json_matches = sorted(custom_dir.glob("*custom_tables.json"))
+        custom_tables = load_custom_tables_json(json_matches[0]) if json_matches else None
         if custom_tables is None:
             logger.error(
                 "Custom class CSVs present in %s but custom_tables.json is missing or "
                 "unparseable. Events sidecar will not describe custom columns.",
-                session_dir,
+                custom_dir,
             )
         else:
-            # Report schema/CSV inconsistencies as log warnings (no validation check).
             for schema in custom_tables:
                 df = custom_tables_data.get(schema.class_name)
                 if df is None:
@@ -463,7 +441,7 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
                         "custom_tables.json declares class '%s' but no matching CSV was "
                         "loaded in %s.",
                         schema.class_name,
-                        session_dir,
+                        custom_dir,
                     )
                 elif schema.row_count != len(df):
                     logger.warning(
@@ -471,7 +449,7 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
                         schema.class_name,
                         schema.row_count,
                         len(df),
-                        session_dir,
+                        custom_dir,
                     )
 
     # Create session

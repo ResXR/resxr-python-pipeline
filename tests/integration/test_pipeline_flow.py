@@ -619,19 +619,18 @@ def test_events_at_session_root_with_custom_class(tmp_path, minimal_config_dict)
     data_dir = tmp_path / "sessions"
     bids_root = tmp_path / "bids_out"
     src = _write_session_dir(data_dir, "sess_cc", session_id="CC", with_events=True)
+    custom = src / "custom_tables"
+    custom.mkdir()
     pd.DataFrame({"onset": [0.25], "duration": [0.0], "reaction_time": [0.3]}).to_csv(
-        src / "CC_ChoiceEvent.csv", index=False
+        custom / "CC_ChoiceEvent.csv", index=False
     )
-    (src / "custom_tables.json").write_text(
+    (custom / "custom_tables.json").write_text(
         '[{"class_name":"ChoiceEvent","row_count":1,'
         '"columns":[{"name":"reaction_time","description":"RT","format":"float","units":"s"}]}]'
     )
-    cfg_dict = dict(minimal_config_dict)
-    cfg_dict["input"] = dict(cfg_dict["input"])
-    cfg_dict["input"]["custom_table_patterns"] = ["*ChoiceEvent.csv"]
     cfg = _write_config(
         tmp_path,
-        cfg_dict,
+        minimal_config_dict,
         data_dir=data_dir,
         bids_root=bids_root,
         session_mappings=[{"source_dir": "sess_cc", "subject_id": "01", "session_label": "01"}],

@@ -52,6 +52,10 @@ input:
   metadata_pattern: "*session_metadata.json"
   events_data_pattern: "*events*.csv"
 
+  # Subfolder within each source dir holding custom_tables.json and the
+  # custom data-class CSVs.
+  custom_tables_dir: "custom_tables"
+
 # Output Configuration
 # --------------------
 # Specifies BIDS output settings

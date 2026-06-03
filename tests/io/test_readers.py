@@ -345,38 +345,33 @@ class TestLoadCustomTablesJson:
 
 class TestFindCustomClassCsvs:
     def _make(self, d: Path, name: str, rows: int = 2):
+        d.mkdir(parents=True, exist_ok=True)
         df = pd.DataFrame({"onset": [0.0, 1.0][:rows], "duration": [0.0, 0.0][:rows]})
         df.to_csv(d / name, index=False)
 
-    def test_resolves_patterns_and_strips_session_prefix(self, tmp_path):
-        self._make(tmp_path, "2026.03.12_15-47_ChoiceEvent.csv")
-        result = find_custom_class_csvs(
-            tmp_path, session_id="2026.03.12_15-47", patterns=["*ChoiceEvent.csv"]
-        )
-        assert set(result.keys()) == {"ChoiceEvent"}
+    def test_loads_all_csvs_and_strips_prefix(self, tmp_path):
+        custom = tmp_path / "custom_tables"
+        self._make(custom, "2026.03.12_15-47_ChoiceEvent.csv")
+        self._make(custom, "2026.03.12_15-47_TrialsData.csv")
+        result = find_custom_class_csvs(custom, recording_id="2026.03.12_15-47")
+        assert set(result.keys()) == {"ChoiceEvent", "TrialsData"}
 
     def test_bare_filename_no_prefix(self, tmp_path):
-        self._make(tmp_path, "ChoiceEvent.csv")
-        result = find_custom_class_csvs(
-            tmp_path, session_id="anything", patterns=["*ChoiceEvent.csv"]
-        )
+        custom = tmp_path / "custom_tables"
+        self._make(custom, "ChoiceEvent.csv")
+        result = find_custom_class_csvs(custom, recording_id="anything")
         assert set(result.keys()) == {"ChoiceEvent"}
 
-    def test_empty_patterns_returns_empty(self, tmp_path):
-        self._make(tmp_path, "2026.03.12_15-47_ChoiceEvent.csv")
-        assert find_custom_class_csvs(tmp_path, session_id="x", patterns=[]) == {}
+    def test_missing_folder_returns_empty(self, tmp_path):
+        assert find_custom_class_csvs(tmp_path / "nope", recording_id="x") == {}
 
-    def test_unmatched_file_ignored(self, tmp_path):
-        self._make(tmp_path, "2026.03.12_15-47_ChoiceEvent.csv")
-        self._make(tmp_path, "2026.03.12_15-47_Scratch.csv")
-        result = find_custom_class_csvs(
-            tmp_path, session_id="2026.03.12_15-47", patterns=["*ChoiceEvent.csv"]
-        )
+    def test_ignores_non_csv_files(self, tmp_path):
+        custom = tmp_path / "custom_tables"
+        self._make(custom, "ChoiceEvent.csv")
+        (custom / "custom_tables.json").write_text("[]")
+        (custom / "notes.txt").write_text("x")
+        result = find_custom_class_csvs(custom, recording_id="x")
         assert set(result.keys()) == {"ChoiceEvent"}
-
-    def test_pattern_matching_nothing_does_not_raise(self, tmp_path):
-        # No file matches; must return {} and not raise.
-        assert find_custom_class_csvs(tmp_path, session_id="x", patterns=["*Nope.csv"]) == {}
 
 
 # ===========================================================================
@@ -488,7 +483,7 @@ class TestLoadSessionCustomTableLogging:
             face_data_pattern="*_FaceExpressionData.csv",
             metadata_pattern="session_metadata.json",
             events_data_pattern="*_EventsData.csv",
-            custom_table_patterns=["*ChoiceEvent.csv"],
+            custom_tables_dir="custom_tables",
         )
 
     def _session_dir(self, tmp_path: Path, choice_rows: int, tables_json: str) -> Path:
@@ -498,10 +493,12 @@ class TestLoadSessionCustomTableLogging:
         pd.DataFrame({"timeSinceStartup": [1.0, 1.1], "Node_Head_px": [0.1, 0.2]}).to_csv(
             d / "sess_ContinuousData.csv", index=False
         )
+        custom = d / "custom_tables"
+        custom.mkdir()
         pd.DataFrame(
             {"onset": [0.0, 1.0][:choice_rows], "duration": [0.0, 0.0][:choice_rows]}
-        ).to_csv(d / "sess_ChoiceEvent.csv", index=False)
-        (d / "custom_tables.json").write_text(tables_json)
+        ).to_csv(custom / "sess_ChoiceEvent.csv", index=False)
+        (custom / "custom_tables.json").write_text(tables_json)
         return d
 
     def test_row_count_mismatch_logs_warning(self, tmp_path, caplog):
