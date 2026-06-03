@@ -285,7 +285,7 @@ def test_motion_tsv_columns_match_channels_contract(tmp_path, minimal_config_dic
     events_file = motion_dir / "sub-01_ses-01_task-vr_events.tsv"
     assert events_file.exists()
     events_df = pd.read_csv(events_file, sep="\t")
-    assert list(events_df.columns[:3]) == ["onset", "duration", "trial_type"]
+    assert list(events_df.columns[:3]) == ["onset", "duration", "name"]
 
     deriv_motion_dir = bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01" / "motion"
     assert not list(deriv_motion_dir.glob("*_events.tsv"))

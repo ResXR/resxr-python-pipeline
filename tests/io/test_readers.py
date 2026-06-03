@@ -165,16 +165,16 @@ class TestLoadEventsData:
         df = load_events_data(tmp_events_csv)
         assert isinstance(df, pd.DataFrame)
 
-    def test_renames_name_to_trial_type(self, tmp_events_csv):
-        """'name' column is renamed to 'trial_type' for BIDS compliance."""
+    def test_keeps_name_column(self, tmp_events_csv):
+        """'name' is preserved (no rename to trial_type)."""
         df = load_events_data(tmp_events_csv)
-        assert "trial_type" in df.columns
-        assert "name" not in df.columns
+        assert "name" in df.columns
+        assert "trial_type" not in df.columns
 
     def test_required_columns_present(self, tmp_events_csv):
-        """trial_type, onset, and duration columns are all present."""
+        """name, onset, and duration columns are all present."""
         df = load_events_data(tmp_events_csv)
-        for col in ("trial_type", "onset", "duration"):
+        for col in ("name", "onset", "duration"):
             assert col in df.columns
 
     def test_onset_sorted_ascending(self, tmp_path):

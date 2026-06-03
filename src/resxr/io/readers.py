@@ -144,7 +144,7 @@ def load_events_data(csv_path: Path) -> pd.DataFrame:
     Returns
     -------
     pd.DataFrame
-        DataFrame with columns: trial_type, onset, duration
+        DataFrame with columns: name, onset, duration
 
     Raises
     ------
@@ -169,9 +169,6 @@ def load_events_data(csv_path: Path) -> pd.DataFrame:
         raise DataLoadError(
             f"Events file {csv_path} is missing required columns: {sorted(missing)}"
         )
-
-    # Rename for BIDS compliance
-    df = df.rename(columns={"name": "trial_type"})
 
     # Ensure numeric onset and duration as float
     for col in ["onset", "duration"]:

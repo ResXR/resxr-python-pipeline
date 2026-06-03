@@ -34,7 +34,7 @@ def _sample_df() -> pd.DataFrame:
 def _events_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "trial_type": ["start", "end"],
+            "name": ["start", "end"],
             "onset": [0.0, 10.0],
             "duration": [0.0, 0.0],
         }
@@ -269,11 +269,11 @@ class TestWriteBidsEvents:
         assert (tmp_path / "events.json").exists()
 
     def test_required_columns_present(self, tmp_path):
-        """Written TSV has onset, duration, and trial_type columns."""
+        """Written TSV has onset, duration, and name columns."""
         path = tmp_path / "events.tsv"
         write_bids_events(_events_df(), path)
         df = pd.read_csv(path, sep="\t")
-        for col in ("trial_type", "onset", "duration"):
+        for col in ("name", "onset", "duration"):
             assert col in df.columns
 
     def test_bids_required_columns_are_first(self, tmp_path):
@@ -281,13 +281,13 @@ class TestWriteBidsEvents:
         path = tmp_path / "events.tsv"
         write_bids_events(_events_df(), path)
         df = pd.read_csv(path, sep="\t")
-        assert list(df.columns[:3]) == ["onset", "duration", "trial_type"]
+        assert list(df.columns[:3]) == ["onset", "duration", "name"]
 
     def test_missing_required_column_raises(self, tmp_path):
         """DataFrame missing 'onset' column raises BIDSWriteError."""
         from resxr.core.exceptions import BIDSWriteError
 
-        bad_df = pd.DataFrame({"trial_type": ["evt"], "duration": [1.0]})
+        bad_df = pd.DataFrame({"name": ["evt"], "duration": [1.0]})
         with pytest.raises(BIDSWriteError):
             write_bids_events(bad_df, tmp_path / "events.tsv")
 
@@ -295,7 +295,7 @@ class TestWriteBidsEvents:
         """Events in the output file are sorted by onset time."""
         df = pd.DataFrame(
             {
-                "trial_type": ["c", "a", "b"],
+                "name": ["c", "a", "b"],
                 "onset": [10.0, 0.0, 5.0],
                 "duration": [0.0, 0.0, 0.0],
             }
