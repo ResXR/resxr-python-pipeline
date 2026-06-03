@@ -7,6 +7,7 @@ Handles writing BIDS-compliant TSV and JSON files.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -250,3 +251,22 @@ def write_bids_events(
         logger.debug(f"Wrote events.json: {events_json_path}")
     except Exception as e:
         raise BIDSWriteError(f"Failed to write events JSON sidecar: {e}") from e
+
+
+def copy_sourcedata(session_dir: Path, dest_dir: Path, overwrite: bool = False) -> None:
+    """Copy a raw session directory verbatim into sourcedata/.
+
+    Verbatim only — no transformation, no filtering. If dest exists and is
+    non-empty, skip (and warn) unless overwrite=True, so a re-run never clobbers
+    a previously verified copy.
+    """
+    dest_dir = Path(dest_dir)
+    if dest_dir.exists() and any(dest_dir.iterdir()) and not overwrite:
+        logger.warning(
+            "sourcedata dest %s already exists and is non-empty; skipping copy "
+            "(set output.overwrite=true to re-copy).",
+            dest_dir,
+        )
+        return
+    shutil.copytree(session_dir, dest_dir, dirs_exist_ok=True)
+    logger.debug("Copied sourcedata: %s -> %s", session_dir, dest_dir)

@@ -304,3 +304,51 @@ class TestWriteBidsEvents:
         write_bids_events(df, path)
         df_read = pd.read_csv(path, sep="\t")
         assert list(df_read["onset"]) == sorted(df_read["onset"])
+
+
+# ===========================================================================
+# copy_sourcedata
+# ===========================================================================
+
+
+class TestCopySourcedata:
+    def test_copies_verbatim_including_subdirs(self, tmp_path):
+        from resxr.io.writers import copy_sourcedata
+
+        src = tmp_path / "src"
+        (src / "sub").mkdir(parents=True)
+        (src / "a.csv").write_text("x,y\n1,2\n")
+        (src / "sub" / "b.json").write_text('{"k": 1}')
+        dest = tmp_path / "dest"
+        copy_sourcedata(src, dest)
+        assert (dest / "a.csv").read_text() == "x,y\n1,2\n"
+        assert (dest / "sub" / "b.json").read_text() == '{"k": 1}'
+
+    def test_skips_when_dest_nonempty_and_no_overwrite(self, tmp_path, caplog):
+        import logging
+
+        from resxr.io.writers import copy_sourcedata
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.csv").write_text("new")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "existing.csv").write_text("old")
+        with caplog.at_level(logging.WARNING):
+            copy_sourcedata(src, dest, overwrite=False)
+        assert (dest / "existing.csv").exists()
+        assert not (dest / "a.csv").exists()
+        assert "skipping" in caplog.text.lower()
+
+    def test_recopies_when_overwrite_true(self, tmp_path):
+        from resxr.io.writers import copy_sourcedata
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.csv").write_text("new")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "existing.csv").write_text("old")
+        copy_sourcedata(src, dest, overwrite=True)
+        assert (dest / "a.csv").exists()
