@@ -294,6 +294,123 @@ class TestLoadSession:
 
 
 # ===========================================================================
+# load_custom_tables_json
+# ===========================================================================
+
+from resxr.io.readers import (  # noqa: E402
+    find_custom_class_csvs,
+    load_custom_class_csv,
+    load_custom_tables_json,
+)
+
+_FIXTURES = Path(__file__).parent / "_fixtures"
+
+
+class TestLoadCustomTablesJson:
+    def test_valid_file_parses_all_fields(self):
+        tables = load_custom_tables_json(_FIXTURES / "sample_custom_tables.json")
+        assert tables is not None
+        assert len(tables) == 1
+        t = tables[0]
+        assert t.class_name == "ChoiceEvent"
+        assert t.row_count == 2
+        rt = t.columns[0]
+        assert rt.name == "reaction_time"
+        assert rt.units == "s"
+        assert rt.minimum == 0.0
+        assert rt.maximum is None
+        assert rt.levels is None
+        choice = t.columns[1]
+        assert choice.levels == {"L": "left", "R": "right"}
+        assert choice.units is None
+
+    def test_absent_file_returns_none(self, tmp_path):
+        assert load_custom_tables_json(tmp_path / "nope.json") is None
+
+    def test_malformed_json_returns_none(self, tmp_path):
+        bad = tmp_path / "custom_tables.json"
+        bad.write_text("{not valid")
+        assert load_custom_tables_json(bad) is None
+
+    def test_missing_required_key_returns_none(self, tmp_path):
+        bad = tmp_path / "custom_tables.json"
+        bad.write_text('[{"row_count": 1, "columns": []}]')  # no class_name
+        assert load_custom_tables_json(bad) is None
+
+
+# ===========================================================================
+# find_custom_class_csvs
+# ===========================================================================
+
+
+class TestFindCustomClassCsvs:
+    def _make(self, d: Path, name: str, rows: int = 2):
+        df = pd.DataFrame({"onset": [0.0, 1.0][:rows], "duration": [0.0, 0.0][:rows]})
+        df.to_csv(d / name, index=False)
+
+    def test_resolves_patterns_and_strips_session_prefix(self, tmp_path):
+        self._make(tmp_path, "2026.03.12_15-47_ChoiceEvent.csv")
+        result = find_custom_class_csvs(
+            tmp_path, session_id="2026.03.12_15-47", patterns=["*ChoiceEvent.csv"]
+        )
+        assert set(result.keys()) == {"ChoiceEvent"}
+
+    def test_bare_filename_no_prefix(self, tmp_path):
+        self._make(tmp_path, "ChoiceEvent.csv")
+        result = find_custom_class_csvs(
+            tmp_path, session_id="anything", patterns=["*ChoiceEvent.csv"]
+        )
+        assert set(result.keys()) == {"ChoiceEvent"}
+
+    def test_empty_patterns_returns_empty(self, tmp_path):
+        self._make(tmp_path, "2026.03.12_15-47_ChoiceEvent.csv")
+        assert find_custom_class_csvs(tmp_path, session_id="x", patterns=[]) == {}
+
+    def test_unmatched_file_ignored(self, tmp_path):
+        self._make(tmp_path, "2026.03.12_15-47_ChoiceEvent.csv")
+        self._make(tmp_path, "2026.03.12_15-47_Scratch.csv")
+        result = find_custom_class_csvs(
+            tmp_path, session_id="2026.03.12_15-47", patterns=["*ChoiceEvent.csv"]
+        )
+        assert set(result.keys()) == {"ChoiceEvent"}
+
+    def test_pattern_matching_nothing_does_not_raise(self, tmp_path):
+        # No file matches; must return {} and not raise.
+        assert find_custom_class_csvs(tmp_path, session_id="x", patterns=["*Nope.csv"]) == {}
+
+
+# ===========================================================================
+# load_custom_class_csv
+# ===========================================================================
+
+
+class TestLoadCustomClassCsv:
+    def test_loads_valid(self, tmp_path):
+        p = tmp_path / "ChoiceEvent.csv"
+        pd.DataFrame({"onset": [0.0], "duration": [1.0], "rt": [0.3]}).to_csv(p, index=False)
+        df = load_custom_class_csv(p)
+        assert list(df["onset"]) == [0.0]
+
+    def test_missing_onset_raises(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        pd.DataFrame({"duration": [1.0]}).to_csv(p, index=False)
+        with pytest.raises(DataLoadError, match="onset"):
+            load_custom_class_csv(p)
+
+    def test_missing_duration_raises(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        pd.DataFrame({"onset": [0.0]}).to_csv(p, index=False)
+        with pytest.raises(DataLoadError, match="duration"):
+            load_custom_class_csv(p)
+
+    def test_non_numeric_onset_raises(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        pd.DataFrame({"onset": ["x"], "duration": [1.0]}).to_csv(p, index=False)
+        with pytest.raises(DataLoadError):
+            load_custom_class_csv(p)
+
+
+# ===========================================================================
 # discover_sessions
 # ===========================================================================
 

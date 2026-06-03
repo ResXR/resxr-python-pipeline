@@ -14,9 +14,13 @@ from .column_maps import (
     infer_bids_channel_info,
 )
 from .readers import (
+    SessionFiles,
     discover_sessions,
+    find_custom_class_csvs,
     find_session_files,
     load_continuous_data,
+    load_custom_class_csv,
+    load_custom_tables_json,
     load_face_data,
     load_session,
     load_session_metadata,
@@ -43,6 +47,10 @@ __all__ = [
     "load_session",
     "discover_sessions",
     "find_session_files",
+    "find_custom_class_csvs",
+    "load_custom_class_csv",
+    "load_custom_tables_json",
+    "SessionFiles",
     # Column maps
     "get_columns_for_system",
     "classify_columns_by_system",

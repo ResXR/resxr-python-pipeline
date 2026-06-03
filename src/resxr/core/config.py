@@ -39,6 +39,10 @@ class InputConfig(ConfigModel):
     face_data_pattern: str
     metadata_pattern: str
     events_data_pattern: str
+    # Globs (matched within the session dir) selecting which custom-class CSVs
+    # to load. Empty = this experiment defines no custom classes. There is NO
+    # auto-discovery: a file is loaded only if a pattern here matches it.
+    custom_table_patterns: list[str] = Field(default_factory=list)
 
 
 class OutputConfig(ConfigModel):

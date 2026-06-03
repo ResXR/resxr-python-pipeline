@@ -135,6 +135,23 @@ class TestConfigFields:
         assert isinstance(ic.metadata_pattern, str)
         assert isinstance(ic.events_data_pattern, str)
 
+
+def test_input_config_custom_table_patterns_defaults_empty(minimal_config_dict):
+    from resxr.core.config import PipelineConfig
+
+    cfg = PipelineConfig.model_validate(minimal_config_dict)
+    assert cfg.input.custom_table_patterns == []
+
+
+def test_input_config_custom_table_patterns_parsed(minimal_config_dict):
+    from resxr.core.config import PipelineConfig
+
+    d = dict(minimal_config_dict)
+    d["input"] = dict(d["input"])
+    d["input"]["custom_table_patterns"] = ["*ChoiceEvent.csv", "*TrialsData.csv"]
+    cfg = PipelineConfig.model_validate(d)
+    assert cfg.input.custom_table_patterns == ["*ChoiceEvent.csv", "*TrialsData.csv"]
+
     def test_output_config_fields(self, pipeline_config):
         """OutputConfig fields are accessible and correctly typed."""
         oc = pipeline_config.output

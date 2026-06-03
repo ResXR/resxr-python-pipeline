@@ -7,6 +7,7 @@ Handles loading CSV tracking data and JSON metadata files.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -15,7 +16,7 @@ import pandas as pd
 from ..core.config import InputConfig
 from ..core.exceptions import DataLoadError, MissingDataError
 from ..core.logger import get_logger
-from ..core.session import Session, SessionMetadata
+from ..core.session import ColumnInfoEntry, CustomTableSchema, Session, SessionMetadata
 
 logger = get_logger(__name__)
 
@@ -248,54 +249,136 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
     )
 
 
-def find_session_files(
-    session_dir: Path, config: InputConfig
-) -> tuple[Path | None, Path | None, Path | None, Path | None]:
+@dataclass
+class SessionFiles:
+    """Resolved paths for one session directory."""
+
+    continuous: Path | None
+    face: Path | None
+    metadata: Path | None
+    events: Path | None
+    custom_tables_json: Path | None = None
+    custom_csvs: dict[str, Path] = field(default_factory=dict)
+
+
+def load_custom_tables_json(json_path: Path) -> list[CustomTableSchema] | None:
+    """Parse custom_tables.json into CustomTableSchema list.
+
+    Returns None if the file is missing or unparseable (all-or-nothing: one bad
+    entry voids the whole file). Logs an error on any failure so the bad entry
+    is findable. No fallback, no header scanning.
     """
-    Find data files in a session directory using configured patterns.
+    if not json_path.exists():
+        logger.error("custom_tables.json not found at %s", json_path)
+        return None
+    try:
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+        custom_tables = []
+        for t in data:
+            cols = [
+                ColumnInfoEntry(
+                    name=c["name"],
+                    description=c["description"],
+                    format=c["format"],
+                    units=c.get("units"),
+                    levels=c.get("levels"),
+                    minimum=c.get("minimum"),
+                    maximum=c.get("maximum"),
+                )
+                for c in t.get("columns", [])
+            ]
+            custom_tables.append(
+                CustomTableSchema(
+                    class_name=t["class_name"],
+                    row_count=t.get("row_count", 0),
+                    columns=cols,
+                )
+            )
+        return custom_tables
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
+        logger.error("Failed to parse custom_tables.json at %s: %s", json_path, e)
+        return None
 
-    Parameters
-    ----------
-    session_dir : Path
-        Directory to search
-    config : InputConfig
-        Input configuration with file patterns
 
-    Returns
-    -------
-    tuple[Optional[Path], Optional[Path], Optional[Path], Optional[Path]]
-        (metadata_path, continuous_data_path, face_data_path, events_path)
+def find_custom_class_csvs(
+    session_dir: Path,
+    session_id: str,
+    patterns: list[str],
+) -> dict[str, Path]:
+    """Resolve configured glob patterns to custom-class CSV paths.
+
+    Config-driven: a file is included only if one of `patterns` matches it.
+    `session_id` is used solely to strip the per-session filename prefix when
+    deriving the class name. A pattern matching nothing logs a warning (likely a
+    typo, or a class that did not record this session) and is skipped.
     """
-    metadata_files = list(session_dir.glob(config.metadata_pattern))
-    continuous_files = list(session_dir.glob(config.continuous_data_pattern))
-    face_files = list(session_dir.glob(config.face_data_pattern))
-    events_files = list(session_dir.glob(config.events_data_pattern))
+    result: dict[str, Path] = {}
+    seen: set[Path] = set()
+    for pattern in patterns:
+        matches = sorted(session_dir.glob(pattern))
+        if not matches:
+            logger.warning(
+                "custom_table_patterns entry '%s' matched no file in %s", pattern, session_dir
+            )
+            continue
+        for path in matches:
+            if path in seen:
+                continue
+            seen.add(path)
+            stem = path.stem
+            class_name = stem.removeprefix(f"{session_id}_")
+            result[class_name] = path
+    return result
 
-    # Take the most recent file if multiple matches
-    metadata_path = max(metadata_files, key=lambda p: p.stat().st_mtime) if metadata_files else None
-    continuous_path = (
-        max(continuous_files, key=lambda p: p.stat().st_mtime) if continuous_files else None
-    )
-    face_path = max(face_files, key=lambda p: p.stat().st_mtime) if face_files else None
-    events_path = max(events_files, key=lambda p: p.stat().st_mtime) if events_files else None
 
-    if (
-        len(metadata_files) > 1
-        or len(continuous_files) > 1
-        or len(face_files) > 1
-        or len(events_files) > 1
-    ):
-        logger.warning(
-            "Multiple files matched patterns in %s (metadata=%d, continuous=%d, face=%d, events=%d); "
-            "using most recent by mtime. Verify the correct file was selected.",
-            session_dir,
-            len(metadata_files),
-            len(continuous_files),
-            len(face_files),
-            len(events_files),
+def load_custom_class_csv(path: Path) -> pd.DataFrame:
+    """Load one custom-class CSV. Requires numeric lowercase onset & duration."""
+    try:
+        df = pd.read_csv(
+            path,
+            na_values=["", "NaN", "null", "None"],
+            low_memory=False,
+            encoding="utf-8-sig",
         )
+    except Exception as e:
+        raise DataLoadError(f"Failed to load custom class CSV {path}: {e}") from e
 
-    return metadata_path, continuous_path, face_path, events_path
+    for col in ("onset", "duration"):
+        if col not in df.columns:
+            raise DataLoadError(
+                f"Custom class CSV {path} is missing required column '{col}'. "
+                f"Every CustomDataClass must expose float onset and float duration."
+            )
+        try:
+            df[col] = pd.to_numeric(df[col], errors="raise").astype(float)
+        except Exception as e:
+            raise DataLoadError(
+                f"Column '{col}' in custom class CSV {path} must be numeric: {e}"
+            ) from e
+    return df
+
+
+def find_session_files(session_dir: Path, config: InputConfig) -> SessionFiles:
+    """Find data files in a session directory using configured patterns."""
+
+    def _most_recent(pattern: str) -> Path | None:
+        files = list(session_dir.glob(pattern))
+        if len(files) > 1:
+            logger.warning(
+                "Multiple files matched '%s' in %s; using most recent by mtime.",
+                pattern,
+                session_dir,
+            )
+        return max(files, key=lambda p: p.stat().st_mtime) if files else None
+
+    return SessionFiles(
+        continuous=_most_recent(config.continuous_data_pattern),
+        face=_most_recent(config.face_data_pattern),
+        metadata=_most_recent(config.metadata_pattern),
+        events=_most_recent(config.events_data_pattern),
+        custom_tables_json=_most_recent("*custom_tables.json"),
+    )
 
 
 def load_session(session_dir: Path, config: InputConfig) -> Session:
@@ -328,34 +411,52 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     logger.info(f"Loading session from: {session_dir}")
 
     # Find files
-    metadata_path, continuous_path, face_path, events_path = find_session_files(session_dir, config)
+    files = find_session_files(session_dir, config)
 
     # Metadata is required
-    if metadata_path is None:
+    if files.metadata is None:
         raise MissingDataError(
             f"No metadata file matching '{config.metadata_pattern}' in {session_dir}"
         )
-    metadata = load_session_metadata(metadata_path)
+    metadata = load_session_metadata(files.metadata)
 
     # Load continuous data (required)
-    if continuous_path is None:
+    if files.continuous is None:
         raise MissingDataError(
             f"No continuous data file matching '{config.continuous_data_pattern}' in {session_dir}"
         )
-    raw_continuous = load_continuous_data(continuous_path)
+    raw_continuous = load_continuous_data(files.continuous)
 
     # Load face data (optional)
     raw_face = None
-    if face_path is not None:
+    if files.face is not None:
         try:
-            raw_face = load_face_data(face_path)
+            raw_face = load_face_data(files.face)
         except DataLoadError as e:
             logger.warning(f"Could not load face data: {e}")
 
     # Load events data (optional but recommended)
     raw_events = None
-    if events_path is not None:
-        raw_events = load_events_data(events_path)
+    if files.events is not None:
+        raw_events = load_events_data(files.events)
+
+    # Custom data classes (config-driven; opt-in via custom_table_patterns)
+    custom_csvs = find_custom_class_csvs(
+        session_dir, metadata.session_id, config.custom_table_patterns
+    )
+    custom_tables_data = {name: load_custom_class_csv(p) for name, p in custom_csvs.items()}
+
+    custom_tables = None
+    if custom_tables_data:
+        custom_tables = (
+            load_custom_tables_json(files.custom_tables_json) if files.custom_tables_json else None
+        )
+        if custom_tables is None:
+            logger.error(
+                "Custom class CSVs present in %s but custom_tables.json is missing or "
+                "unparseable. Events sidecar will not describe custom columns.",
+                session_dir,
+            )
 
     # Create session
     session = Session(
@@ -364,6 +465,8 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
         raw_continuous_data=raw_continuous,
         raw_face_data=raw_face,
         raw_events_data=raw_events,
+        custom_tables=custom_tables,
+        custom_tables_data=custom_tables_data,
         source_dir=str(session_dir),
     )
 
