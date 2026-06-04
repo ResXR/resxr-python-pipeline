@@ -336,8 +336,7 @@ class TestLoadCustomTablesJson:
         bad = tmp_path / "CustomTables.json"
         # Column missing the mandatory "Format" field voids the whole file.
         bad.write_text(
-            '{"CustomTables":{"ChoiceEvent":{"RowCount":1,'
-            '"Columns":{"x":{"Description":"d"}}}}}'
+            '{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{"x":{"Description":"d"}}}}}'
         )
         assert load_custom_tables_json(bad) is None
 

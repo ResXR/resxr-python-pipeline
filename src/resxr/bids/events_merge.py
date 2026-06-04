@@ -76,17 +76,21 @@ def merge_events(
                             f"Shared columns must be defined in the sidecar json so their metadata can be verified."
                         )
 
-                    if (col1.description != col2.description or
-                        col1.format != col2.format or
-                        col1.units != col2.units or
-                        col1.levels != col2.levels or
-                        col1.minimum != col2.minimum or
-                        col1.maximum != col2.maximum):
+                    if (
+                        col1.description != col2.description
+                        or col1.format != col2.format
+                        or col1.units != col2.units
+                        or col1.levels != col2.levels
+                        or col1.minimum != col2.minimum
+                        or col1.maximum != col2.maximum
+                    ):
                         raise ResXRError(
                             f"Column '{col}' appears in both '{prev_cls}' and '{cls}' "
                             f"but has conflicting metadata. Please ensure they have identical meanings, or rename them."
                         )
-                    logger.info(f"Merging shared column '{col}' from custom classes '{prev_cls}' and '{cls}'")
+                    logger.info(
+                        f"Merging shared column '{col}' from custom classes '{prev_cls}' and '{cls}'"
+                    )
             seen[col] = cls
 
     # 4. Empty case.
