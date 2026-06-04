@@ -1,0 +1,23 @@
+{
+  "TaskName": "VRtracking",
+  "TaskDescription": "Eye gaze tracking from Meta Quest VR headset",
+  "Manufacturer": "Meta",
+  "ManufacturersModelName": "Quest Pro",
+  "SoftwareVersions": "Unity 6000.0.68f1, OVR Plugin v1.110.0",
+  "TrackingSystemName": "Eyes",
+  "SamplingFrequency": 30.0,
+  "SamplingFrequencyEffective": 29.98246483554699,
+  "MissingValues": "NaN",
+  "MotionChannelCount": 40,
+  "TrackedPointsCount": 10,
+  "ACCELChannelCount": 0,
+  "ANGACCELChannelCount": 0,
+  "GYROChannelCount": 0,
+  "JNTANGChannelCount": 0,
+  "LATENCYChannelCount": 3,
+  "MAGNChannelCount": 0,
+  "MISCChannelCount": 13,
+  "ORNTChannelCount": 12,
+  "POSChannelCount": 12,
+  "VELChannelCount": 0
+}

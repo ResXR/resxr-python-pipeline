@@ -1,0 +1,177 @@
+{
+  "onset": {
+    "Description": "Onset time of event in seconds relative to recording start",
+    "Units": "s"
+  },
+  "duration": {
+    "Description": "Duration of event in seconds (0 for instantaneous events)",
+    "Units": "s"
+  },
+  "name": {
+    "Description": "Event type or custom data-class name",
+    "LongName": "Event Type",
+    "Levels": {
+      "StimulusBounds": "StimulusBounds",
+      "session_start": "session_start",
+      "task_start:1 Fixed Order Round Example": "task_start:1 Fixed Order Round Example",
+      "task_instructions:1 Fixed Order Round Example": "task_instructions:1 Fixed Order Round Example",
+      "trial_start:1 Fixed Order Round Example_t0": "trial_start:1 Fixed Order Round Example_t0",
+      "TrialsData": "TrialsData",
+      "ChoiceEvents": "ChoiceEvents",
+      "fixation": "fixation",
+      "trial_start:1 Fixed Order Round Example_t1": "trial_start:1 Fixed Order Round Example_t1",
+      "trial_start:1 Fixed Order Round Example_t2": "trial_start:1 Fixed Order Round Example_t2",
+      "trial_start:1 Fixed Order Round Example_t3": "trial_start:1 Fixed Order Round Example_t3",
+      "task_end:1 Fixed Order Round Example": "task_end:1 Fixed Order Round Example",
+      "task_start:2 Random Order Round Example": "task_start:2 Random Order Round Example",
+      "task_instructions:2 Random Order Round Example": "task_instructions:2 Random Order Round Example",
+      "trial_start:2 Random Order Round Example_t0": "trial_start:2 Random Order Round Example_t0",
+      "trial_start:2 Random Order Round Example_t1": "trial_start:2 Random Order Round Example_t1",
+      "trial_start:2 Random Order Round Example_t2": "trial_start:2 Random Order Round Example_t2",
+      "trial_start:2 Random Order Round Example_t3": "trial_start:2 Random Order Round Example_t3",
+      "task_end:2 Random Order Round Example": "task_end:2 Random Order Round Example",
+      "session_end": "session_end"
+    }
+  },
+  "Task": {
+    "Description": "Task name or index within the session",
+    "Format": "string",
+    "Units": "n/a"
+  },
+  "Trial": {
+    "Description": "Trial index within the task",
+    "Format": "integer",
+    "Units": "n/a"
+  },
+  "OptionAName": {
+    "Description": "Name of the image sprite shown in slot A",
+    "Format": "string",
+    "Units": "n/a"
+  },
+  "OptionBName": {
+    "Description": "Name of the image sprite shown in slot B",
+    "Format": "string",
+    "Units": "n/a"
+  },
+  "Choice": {
+    "Description": "Name of the chosen image",
+    "Format": "string",
+    "Units": "n/a"
+  },
+  "ChosenOption": {
+    "Description": "Slot chosen by the participant",
+    "Format": "string",
+    "Units": "n/a",
+    "Levels": {
+      "A": "Left slot",
+      "B": "Right slot"
+    }
+  },
+  "HandUsed": {
+    "Description": "Hand used to touch the chosen stimulus",
+    "Format": "string",
+    "Units": "n/a",
+    "Levels": {
+      "Left": "Left hand",
+      "Right": "Right hand"
+    }
+  },
+  "ReactionTime": {
+    "Description": "Seconds from stimulus display to touch",
+    "Format": "number",
+    "Units": "s",
+    "Minimum": 0
+  },
+  "displayTime": {
+    "Description": "Seconds since application start when the stimuli appeared on screen",
+    "Format": "number",
+    "Units": "s",
+    "Minimum": 0
+  },
+  "ChoiceTime": {
+    "Description": "Seconds since application start when the choice touch was registered",
+    "Format": "number",
+    "Units": "s",
+    "Minimum": 0
+  },
+  "ChoiceId": {
+    "Description": "Slot identifier matching ChosenOption in ChoiceEvents",
+    "Format": "string",
+    "Units": "n/a",
+    "Levels": {
+      "A": "Left slot",
+      "B": "Right slot"
+    }
+  },
+  "RendererCenterX": {
+    "Description": "World-space X component of the renderer bounding box centre",
+    "Format": "number",
+    "Units": "m"
+  },
+  "RendererCenterY": {
+    "Description": "World-space Y component of the renderer bounding box centre",
+    "Format": "number",
+    "Units": "m"
+  },
+  "RendererCenterZ": {
+    "Description": "World-space Z component of the renderer bounding box centre",
+    "Format": "number",
+    "Units": "m"
+  },
+  "RendererSizeX": {
+    "Description": "World-space X extent of the renderer bounding box",
+    "Format": "number",
+    "Units": "m",
+    "Minimum": 0
+  },
+  "RendererSizeY": {
+    "Description": "World-space Y extent of the renderer bounding box",
+    "Format": "number",
+    "Units": "m",
+    "Minimum": 0
+  },
+  "RendererSizeZ": {
+    "Description": "World-space Z extent of the renderer bounding box",
+    "Format": "number",
+    "Units": "m",
+    "Minimum": 0
+  },
+  "ColliderCenterX": {
+    "Description": "World-space X component of the collider bounding box centre",
+    "Format": "number",
+    "Units": "m"
+  },
+  "ColliderCenterY": {
+    "Description": "World-space Y component of the collider bounding box centre",
+    "Format": "number",
+    "Units": "m"
+  },
+  "ColliderCenterZ": {
+    "Description": "World-space Z component of the collider bounding box centre",
+    "Format": "number",
+    "Units": "m"
+  },
+  "ColliderSizeX": {
+    "Description": "World-space X extent of the collider bounding box",
+    "Format": "number",
+    "Units": "m",
+    "Minimum": 0
+  },
+  "ColliderSizeY": {
+    "Description": "World-space Y extent of the collider bounding box",
+    "Format": "number",
+    "Units": "m",
+    "Minimum": 0
+  },
+  "ColliderSizeZ": {
+    "Description": "World-space Z extent of the collider bounding box",
+    "Format": "number",
+    "Units": "m",
+    "Minimum": 0
+  },
+  "TrialName": {
+    "Description": "Human-readable unique trial name, e.g. task1_t3",
+    "Format": "string",
+    "Units": "n/a"
+  }
+}
