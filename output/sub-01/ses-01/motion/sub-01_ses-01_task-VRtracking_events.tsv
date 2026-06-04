@@ -1,0 +1,7 @@
+onset	duration	trial_type
+0.0	0.0	session_start
+10.0	0.0	trial_start
+15.5	2.0	stimulus_present
+18.3	0.0	participant_response
+20.0	0.0	trial_end
+40.0	0.0	session_end

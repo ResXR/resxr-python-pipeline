@@ -1,0 +1,5 @@
+filename	acq_time
+motion/sub-01_ses-01_task-VRtracking_tracksys-Head_motion.tsv	2026-03-12T15:47:51.000
+motion/sub-01_ses-01_task-VRtracking_tracksys-Hands_motion.tsv	2026-03-12T15:47:51.000
+motion/sub-01_ses-01_task-VRtracking_tracksys-Eyes_motion.tsv	2026-03-12T15:47:51.000
+motion/sub-01_ses-01_task-VRtracking_tracksys-Face_motion.tsv	2026-03-12T15:47:51.000

@@ -1,0 +1,10 @@
+{
+  "Name": "ResXR VR Tracking Dataset (preprocessed)",
+  "BIDSVersion": "1.10.1",
+  "DatasetType": "derivative",
+  "GeneratedBy": [
+    {
+      "Name": "ResXR"
+    }
+  ]
+}

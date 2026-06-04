@@ -1,0 +1,9 @@
+﻿onset,duration,Task,Trial,OptionAName,OptionBName,Choice,ChosenOption,HandUsed,ReactionTime,displayTime,ChoiceTime
+8.279228,0,1 Fixed Order Round Example,0,Snack_001,Snack_002,Snack_002,B,Right,0.9551334,7.323154,8.278288
+10.46388,0,1 Fixed Order Round Example,1,Snack_003,Snack_004,Snack_003,A,Right,1.669154,8.794006,10.46316
+14.23706,0,1 Fixed Order Round Example,2,Snack_005,Snack_006,Snack_006,B,Left,3.273902,10.96255,14.23645
+16.00355,0,1 Fixed Order Round Example,3,Snack_007,Snack_008,Snack_007,A,Right,1.260325,14.74254,16.00286
+21.90659,0,2 Random Order Round Example,0,Snack_003,Snack_007,Snack_003,A,Right,1.847563,20.05833,21.90589
+24.40023,0,2 Random Order Round Example,1,Snack_001,Snack_008,Snack_008,B,Left,1.99017,22.4094,24.39956
+27.70003,0,2 Random Order Round Example,2,Snack_004,Snack_005,Snack_005,B,Left,2.796341,24.90306,27.69941
+29.61017,0,2 Random Order Round Example,3,Snack_006,Snack_002,Snack_002,B,Left,1.408403,28.20104,29.60944

@@ -1,0 +1,209 @@
+{
+  "CustomTables": {
+    "StimulusBounds": {
+      "File": "2026.06.04_09-55_StimulusBounds.csv",
+      "RowCount": 2,
+      "Columns": {
+        "onset": {
+          "Description": "Time since app start when the event was logged",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "duration": {
+          "Description": "Event duration in seconds; 0 for point events",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "ChoiceId": {
+          "Description": "Slot identifier matching ChosenOption in ChoiceEvents",
+          "Units": "n/a",
+          "Format": "string",
+          "Levels": {
+            "A": "Left slot",
+            "B": "Right slot"
+          }
+        },
+        "RendererCenterX": {
+          "Description": "World-space X component of the renderer bounding box centre",
+          "Units": "m",
+          "Format": "number"
+        },
+        "RendererCenterY": {
+          "Description": "World-space Y component of the renderer bounding box centre",
+          "Units": "m",
+          "Format": "number"
+        },
+        "RendererCenterZ": {
+          "Description": "World-space Z component of the renderer bounding box centre",
+          "Units": "m",
+          "Format": "number"
+        },
+        "RendererSizeX": {
+          "Description": "World-space X extent of the renderer bounding box",
+          "Units": "m",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "RendererSizeY": {
+          "Description": "World-space Y extent of the renderer bounding box",
+          "Units": "m",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "RendererSizeZ": {
+          "Description": "World-space Z extent of the renderer bounding box",
+          "Units": "m",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "ColliderCenterX": {
+          "Description": "World-space X component of the collider bounding box centre",
+          "Units": "m",
+          "Format": "number"
+        },
+        "ColliderCenterY": {
+          "Description": "World-space Y component of the collider bounding box centre",
+          "Units": "m",
+          "Format": "number"
+        },
+        "ColliderCenterZ": {
+          "Description": "World-space Z component of the collider bounding box centre",
+          "Units": "m",
+          "Format": "number"
+        },
+        "ColliderSizeX": {
+          "Description": "World-space X extent of the collider bounding box",
+          "Units": "m",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "ColliderSizeY": {
+          "Description": "World-space Y extent of the collider bounding box",
+          "Units": "m",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "ColliderSizeZ": {
+          "Description": "World-space Z extent of the collider bounding box",
+          "Units": "m",
+          "Format": "number",
+          "Minimum": 0
+        }
+      }
+    },
+    "ChoiceEvents": {
+      "File": "2026.06.04_09-55_ChoiceEvents.csv",
+      "RowCount": 8,
+      "Columns": {
+        "onset": {
+          "Description": "Time since app start when the event was logged",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "duration": {
+          "Description": "Event duration in seconds; 0 for point events",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "Task": {
+          "Description": "Task name or index within the session",
+          "Units": "n/a",
+          "Format": "string"
+        },
+        "Trial": {
+          "Description": "Trial index within the task",
+          "Units": "n/a",
+          "Format": "integer"
+        },
+        "OptionAName": {
+          "Description": "Name of the image sprite shown in slot A",
+          "Units": "n/a",
+          "Format": "string"
+        },
+        "OptionBName": {
+          "Description": "Name of the image sprite shown in slot B",
+          "Units": "n/a",
+          "Format": "string"
+        },
+        "Choice": {
+          "Description": "Name of the chosen image",
+          "Units": "n/a",
+          "Format": "string"
+        },
+        "ChosenOption": {
+          "Description": "Slot chosen by the participant",
+          "Units": "n/a",
+          "Format": "string",
+          "Levels": {
+            "A": "Left slot",
+            "B": "Right slot"
+          }
+        },
+        "HandUsed": {
+          "Description": "Hand used to touch the chosen stimulus",
+          "Units": "n/a",
+          "Format": "string",
+          "Levels": {
+            "Left": "Left hand",
+            "Right": "Right hand"
+          }
+        },
+        "ReactionTime": {
+          "Description": "Seconds from stimulus display to touch",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "displayTime": {
+          "Description": "Seconds since application start when the stimuli appeared on screen",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "ChoiceTime": {
+          "Description": "Seconds since application start when the choice touch was registered",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        }
+      }
+    },
+    "TrialsData": {
+      "File": "2026.06.04_09-55_TrialsData.csv",
+      "RowCount": 8,
+      "Columns": {
+        "onset": {
+          "Description": "Time since app start when the event was logged",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "duration": {
+          "Description": "Event duration in seconds; 0 for point events",
+          "Units": "s",
+          "Format": "number",
+          "Minimum": 0
+        },
+        "Task": {
+          "Description": "Task name or index within the session",
+          "Units": "n/a",
+          "Format": "string"
+        },
+        "Trial": {
+          "Description": "Trial index within the task",
+          "Units": "n/a",
+          "Format": "integer"
+        },
+        "TrialName": {
+          "Description": "Human-readable unique trial name, e.g. task1_t3",
+          "Units": "n/a",
+          "Format": "string"
+        }
+      }
+    }
+  }
+}

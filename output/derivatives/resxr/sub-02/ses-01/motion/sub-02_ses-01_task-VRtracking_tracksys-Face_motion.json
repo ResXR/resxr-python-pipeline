@@ -1,0 +1,23 @@
+{
+  "TaskName": "VRtracking",
+  "TaskDescription": "Facial expression tracking using FACS blend shapes from Meta Quest VR headset",
+  "Manufacturer": "Meta",
+  "ManufacturersModelName": "Quest Pro",
+  "SoftwareVersions": "Unity 6000.0.68f1, OVR Plugin v1.110.0",
+  "TrackingSystemName": "Face",
+  "SamplingFrequency": 30.0,
+  "SamplingFrequencyEffective": 34.363019129210954,
+  "MissingValues": "NaN",
+  "MotionChannelCount": 75,
+  "TrackedPointsCount": 73,
+  "ACCELChannelCount": 0,
+  "ANGACCELChannelCount": 0,
+  "GYROChannelCount": 0,
+  "JNTANGChannelCount": 0,
+  "LATENCYChannelCount": 2,
+  "MAGNChannelCount": 0,
+  "MISCChannelCount": 73,
+  "ORNTChannelCount": 0,
+  "POSChannelCount": 0,
+  "VELChannelCount": 0
+}

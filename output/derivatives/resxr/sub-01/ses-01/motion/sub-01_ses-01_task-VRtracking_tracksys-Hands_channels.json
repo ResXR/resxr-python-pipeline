@@ -1,0 +1,13 @@
+{
+  "reference_frame": {
+    "Description": "Global VR playspace coordinate system. Positive X is right, Y is up (superior), Z is forward (anterior)",
+    "Levels": {
+      "global": {
+        "Description": "Global VR playspace coordinate system. Positive X is right, Y is up (superior), Z is forward (anterior)",
+        "RotationRule": "left-hand",
+        "RotationOrder": "ZXY",
+        "SpatialAxes": "RSA"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "TaskName": "VRtracking",
+  "TaskDescription": "Hand and finger tracking from Meta Quest VR headset including 26 joints per hand",
+  "Manufacturer": "Meta",
+  "ManufacturersModelName": "Quest Pro",
+  "SoftwareVersions": "Unity 6000.0.68f1, OVR Plugin v1.110.0",
+  "TrackingSystemName": "Hands",
+  "SamplingFrequency": 90.0,
+  "SamplingFrequencyEffective": 71.34793499518914,
+  "MissingValues": "NaN",
+  "MotionChannelCount": 433,
+  "TrackedPointsCount": 84,
+  "ACCELChannelCount": 0,
+  "ANGACCELChannelCount": 0,
+  "GYROChannelCount": 0,
+  "JNTANGChannelCount": 0,
+  "LATENCYChannelCount": 3,
+  "MAGNChannelCount": 0,
+  "MISCChannelCount": 38,
+  "ORNTChannelCount": 224,
+  "POSChannelCount": 168,
+  "VELChannelCount": 0
+}

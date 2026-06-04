@@ -1,0 +1,23 @@
+{
+  "TaskName": "VRtracking",
+  "TaskDescription": "Head position and rotation tracking from Meta Quest VR headset",
+  "Manufacturer": "Meta",
+  "ManufacturersModelName": "Quest Pro",
+  "SoftwareVersions": "Unity 6000.0.68f1, OVR Plugin v1.110.0",
+  "TrackingSystemName": "Head",
+  "SamplingFrequency": 72.0,
+  "SamplingFrequencyEffective": 70.46407394887405,
+  "MissingValues": "NaN",
+  "MotionChannelCount": 35,
+  "TrackedPointsCount": 10,
+  "ACCELChannelCount": 0,
+  "ANGACCELChannelCount": 0,
+  "GYROChannelCount": 0,
+  "JNTANGChannelCount": 0,
+  "LATENCYChannelCount": 2,
+  "MAGNChannelCount": 0,
+  "MISCChannelCount": 12,
+  "ORNTChannelCount": 12,
+  "POSChannelCount": 9,
+  "VELChannelCount": 0
+}

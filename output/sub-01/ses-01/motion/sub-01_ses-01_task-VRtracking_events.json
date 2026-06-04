@@ -1,0 +1,14 @@
+{
+  "onset": {
+    "Description": "Onset time of event in seconds relative to recording start",
+    "Units": "s"
+  },
+  "duration": {
+    "Description": "Duration of event in seconds (0 for instantaneous events)",
+    "Units": "s"
+  },
+  "trial_type": {
+    "Description": "Type or name of the event",
+    "LongName": "Event Type"
+  }
+}
