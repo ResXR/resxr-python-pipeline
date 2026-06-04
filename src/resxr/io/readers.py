@@ -209,7 +209,7 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
     logger.info(f"Loading metadata from: {json_path}")
 
     try:
-        with open(json_path, encoding="utf-8") as f:
+        with open(json_path, encoding="utf-8-sig") as f:
             data = json.load(f)
     except Exception as e:
         raise DataLoadError(f"Failed to load {json_path}: {e}") from e
@@ -257,42 +257,48 @@ class SessionFiles:
 
 
 def load_custom_tables_json(json_path: Path) -> list[CustomTableSchema] | None:
-    """Parse custom_tables.json into CustomTableSchema list.
+    """Parse a CustomTables sidecar into a CustomTableSchema list.
+
+    Expects the Unity sourcedata format: a ``"CustomTables"`` object keyed by
+    class name; each table carries ``"RowCount"`` and a ``"Columns"`` object
+    keyed by column name, whose values hold PascalCase metadata fields
+    (``Description``, ``Format`` required; ``Units``, ``Levels``, ``Minimum``,
+    ``Maximum`` optional). Column-name keys are taken verbatim (they mirror the
+    CSV headers).
 
     Returns None if the file is missing or unparseable (all-or-nothing: one bad
-    entry voids the whole file). Logs an error on any failure so the bad entry
-    is findable. No fallback, no header scanning.
+    entry voids the whole file). Logs an error on any failure so it is findable.
     """
     if not json_path.exists():
-        logger.error("custom_tables.json not found at %s", json_path)
+        logger.error("CustomTables.json not found at %s", json_path)
         return None
     try:
-        with open(json_path, encoding="utf-8") as f:
+        with open(json_path, encoding="utf-8-sig") as f:
             data = json.load(f)
         custom_tables = []
-        for t in data:
+        for class_name, table in data["CustomTables"].items():
             cols = [
                 ColumnInfoEntry(
-                    name=c["name"],
-                    description=c["description"],
-                    format=c["format"],
-                    units=c.get("units"),
-                    levels=c.get("levels"),
-                    minimum=c.get("minimum"),
-                    maximum=c.get("maximum"),
+                    name=col_name,
+                    description=meta["Description"],
+                    format=meta["Format"],
+                    units=meta.get("Units"),
+                    levels=meta.get("Levels"),
+                    minimum=meta.get("Minimum"),
+                    maximum=meta.get("Maximum"),
                 )
-                for c in t.get("columns", [])
+                for col_name, meta in table.get("Columns", {}).items()
             ]
             custom_tables.append(
                 CustomTableSchema(
-                    class_name=t["class_name"],
-                    row_count=t.get("row_count", 0),
+                    class_name=class_name,
+                    row_count=table.get("RowCount", 0),
                     columns=cols,
                 )
             )
         return custom_tables
-    except (json.JSONDecodeError, KeyError, TypeError) as e:
-        logger.error("Failed to parse custom_tables.json at %s: %s", json_path, e)
+    except (json.JSONDecodeError, KeyError, TypeError, AttributeError) as e:
+        logger.error("Failed to parse CustomTables.json at %s: %s", json_path, e)
         return None
 
 
@@ -425,12 +431,12 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
 
     custom_tables = None
     if custom_tables_data:
-        json_matches = sorted(custom_dir.glob("*custom_tables.json"))
-        exact = custom_dir / "custom_tables.json"
+        json_matches = sorted(custom_dir.glob("*CustomTables.json"))
+        exact = custom_dir / f"{metadata.session_id}_CustomTables.json"
         json_path = exact if exact.exists() else (json_matches[0] if json_matches else None)
         if len(json_matches) > 1:
             logger.warning(
-                "Multiple files matching '*custom_tables.json' in %s (%s); using '%s'.",
+                "Multiple files matching '*CustomTables.json' in %s (%s); using '%s'.",
                 custom_dir,
                 [p.name for p in json_matches],
                 json_path.name,
@@ -438,8 +444,8 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
         custom_tables = load_custom_tables_json(json_path) if json_path else None
         if custom_tables is None:
             logger.error(
-                "Custom class CSVs present in %s but custom_tables.json is missing or "
-                "unparseable. Events sidecar will not describe custom columns.",
+                "Custom class CSVs present in %s but the CustomTables sidecar is missing "
+                "or unparseable. Events sidecar will not describe custom columns.",
                 custom_dir,
             )
         else:

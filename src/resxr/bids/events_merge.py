@@ -22,6 +22,7 @@ NA = "n/a"
 def merge_events(
     native_events_df: pd.DataFrame | None,
     custom_dfs: dict[str, pd.DataFrame],
+    custom_tables: list[CustomTableSchema] | None = None,
 ) -> pd.DataFrame:
     """Merge native events and custom-class rows into one wide sparse frame.
 
@@ -42,18 +43,54 @@ def merge_events(
         if onset.isna().any():
             raise DataLoadError("Native events contain a null/non-numeric onset value.")
 
-    # 3. Cross-class column collision check (outside the standard set).
+    # 3. Cross-class column collision check (metadata-aware).
     exclude = set(STANDARD_COLS)
+    schema_map = {}
+    if custom_tables:
+        for table in custom_tables:
+            for col in table.columns:
+                schema_map[(table.class_name, col.name)] = col
+
     seen: dict[str, str] = {}
     for cls, df in custom_dfs.items():
         for col in df.columns:
             if col in exclude:
                 continue
             if col in seen:
-                raise ResXRError(
-                    f"Column '{col}' appears in two custom classes: "
-                    f"'{seen[col]}' and '{cls}'. Custom column names must be unique."
-                )
+                prev_cls = seen[col]
+                if custom_tables is None:
+                    # Strict fallback if no schema provided
+                    raise ResXRError(
+                        f"Column '{col}' appears in both '{prev_cls}' and '{cls}'. "
+                        f"Because no CustomTables sidecar json was provided, the pipeline cannot verify they mean the same thing. "
+                        f"Please provide a sidecar json, or rename them."
+                    )
+                else:
+                    col1 = schema_map.get((prev_cls, col))
+                    col2 = schema_map.get((cls, col))
+
+                    if not col1 or not col2:
+                        raise ResXRError(
+                            f"Column '{col}' appears in both '{prev_cls}' and '{cls}'. "
+                            f"However, it is missing from the CustomTables sidecar json for one or both classes. "
+                            f"Shared columns must be defined in the sidecar json so their metadata can be verified."
+                        )
+
+                    if (
+                        col1.description != col2.description
+                        or col1.format != col2.format
+                        or col1.units != col2.units
+                        or col1.levels != col2.levels
+                        or col1.minimum != col2.minimum
+                        or col1.maximum != col2.maximum
+                    ):
+                        raise ResXRError(
+                            f"Column '{col}' appears in both '{prev_cls}' and '{cls}' "
+                            f"but has conflicting metadata. Please ensure they have identical meanings, or rename them."
+                        )
+                    logger.info(
+                        f"Merging shared column '{col}' from custom classes '{prev_cls}' and '{cls}'"
+                    )
             seen[col] = cls
 
     # 4. Empty case.

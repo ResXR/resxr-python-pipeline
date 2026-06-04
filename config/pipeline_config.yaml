@@ -49,8 +49,8 @@ input:
   # File patterns for auto-discovery
   continuous_data_pattern: "*_ContinuousData*.csv"
   face_data_pattern: "*_FaceExpressionData*.csv"
-  metadata_pattern: "*session_metadata.json"
-  events_data_pattern: "*events*.csv"
+  metadata_pattern: "*SessionMetadata.json"
+  events_data_pattern: "*_Events.csv"
 
   # Subfolder within each source dir holding custom_tables.json and the
   # custom data-class CSVs.
@@ -79,6 +79,10 @@ output:
 session_mappings:
   - source_dir: "test_data"
     subject_id: "01"
+    session_label: "01"
+
+  - source_dir: "Demo_Data/BinaryChoice/001"
+    subject_id: "02"
     session_label: "01"
 
   # - source_dir: "17.9.25_hands_TEST_002"

@@ -39,7 +39,7 @@ class InputConfig(ConfigModel):
     face_data_pattern: str
     metadata_pattern: str
     events_data_pattern: str
-    # Subfolder within each source dir holding custom_tables.json and the custom
+    # Subfolder within each source dir holding the CustomTables sidecar and the custom
     # data-class CSVs. Every CSV there is loaded as a custom class.
     custom_tables_dir: str = "custom_tables"
 

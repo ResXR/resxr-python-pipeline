@@ -624,9 +624,9 @@ def test_events_at_session_root_with_custom_class(tmp_path, minimal_config_dict)
     pd.DataFrame({"onset": [0.25], "duration": [0.0], "reaction_time": [0.3]}).to_csv(
         custom / "CC_ChoiceEvent.csv", index=False
     )
-    (custom / "custom_tables.json").write_text(
-        '[{"class_name":"ChoiceEvent","row_count":1,'
-        '"columns":[{"name":"reaction_time","description":"RT","format":"float","units":"s"}]}]'
+    (custom / "CC_CustomTables.json").write_text(
+        '{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":'
+        '{"reaction_time":{"Description":"RT","Units":"s","Format":"float"}}}}}'
     )
     cfg = _write_config(
         tmp_path,
