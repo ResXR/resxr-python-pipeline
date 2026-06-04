@@ -194,7 +194,7 @@ def process_session_from_mapping(
         logger.info(f"  Found {len(flags)} quality flags")
 
     session.merged_events_data = merge_events(
-        session.raw_events_data, 
+        session.raw_events_data,
         session.custom_tables_data,
         session.custom_tables
     )

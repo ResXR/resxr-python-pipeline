@@ -68,14 +68,14 @@ def merge_events(
                 else:
                     col1 = schema_map.get((prev_cls, col))
                     col2 = schema_map.get((cls, col))
-                    
+
                     if not col1 or not col2:
                         raise ResXRError(
                             f"Column '{col}' appears in both '{prev_cls}' and '{cls}'. "
                             f"However, it is missing from the CustomTables sidecar json for one or both classes. "
                             f"Shared columns must be defined in the sidecar json so their metadata can be verified."
                         )
-                        
+
                     if (col1.description != col2.description or
                         col1.format != col2.format or
                         col1.units != col2.units or
