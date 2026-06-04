@@ -193,7 +193,11 @@ def process_session_from_mapping(
         stream.quality_flags = flags
         logger.info(f"  Found {len(flags)} quality flags")
 
-    session.merged_events_data = merge_events(session.raw_events_data, session.custom_tables_data)
+    session.merged_events_data = merge_events(
+        session.raw_events_data, 
+        session.custom_tables_data,
+        session.custom_tables
+    )
 
     # Write RAW BIDS output (original data)
     logger.info("Writing RAW BIDS dataset (original)...")

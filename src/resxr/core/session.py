@@ -189,7 +189,7 @@ class QualityFlag:
 
 @dataclass
 class ColumnInfoEntry:
-    """One column's BIDS description, parsed from custom_tables.json.
+    """One column's BIDS description, parsed from the CustomTables sidecar.
 
     `description` and `format` are always present. The rest are optional and
     only populated when the source JSON includes them.
@@ -206,7 +206,7 @@ class ColumnInfoEntry:
 
 @dataclass
 class CustomTableSchema:
-    """Schema for one custom data class, parsed from custom_tables.json."""
+    """Schema for one custom data class, parsed from the CustomTables sidecar."""
 
     class_name: str
     row_count: int
@@ -371,7 +371,7 @@ class Session:
     raw_face_data: pd.DataFrame | None = None
     raw_events_data: pd.DataFrame | None = None
 
-    # Custom data classes (parsed from custom_tables.json + their CSVs)
+    # Custom data classes (parsed from CustomTables sidecar + their CSVs)
     custom_tables: list[CustomTableSchema] | None = None
     custom_tables_data: dict[str, pd.DataFrame] = field(default_factory=dict)
     # Filled by merge_events just before BIDS events are written

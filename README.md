@@ -75,8 +75,8 @@ input:
   data_dir: /path/to/your/session/data
   continuous_data_pattern: "*_ContinuousData.csv"
   face_data_pattern: "*_FaceExpressionData.csv"
-  metadata_pattern: "*session_metadata.json"
-  events_data_pattern: "*events*.csv"  # Optional: task/stimulus events
+  metadata_pattern: "*SessionMetadata.json"
+  events_data_pattern: "*_Events.csv"  # Optional: task/stimulus events
 
 output:
   bids_root: /path/to/output
@@ -151,10 +151,13 @@ ResXR expects data recorded from Unity/Meta Quest with the following structure:
 
 ```
 session_folder/
-├── *_ContinuousData.csv     # Main tracking data (head, hands, eyes, etc.)
-├── *_FaceExpressionData.csv # Face tracking (FACS blendshapes) - optional
-├── *events*.csv             # Task/stimulus event markers - optional
-└── *session_metadata.json   # Recording configuration & timestamps
+├── *_ContinuousData.csv      # Main tracking data (head, hands, eyes, etc.)
+├── *_FaceExpressionData.csv  # Face tracking (FACS blendshapes) - optional
+├── *_Events.csv              # Task/stimulus event markers - optional
+├── *_SessionMetadata.json    # Recording configuration & timestamps
+└── custom_tables/            # Experiment-defined custom data classes - optional
+    ├── *_CustomTables.json   # Schema describing each custom table's columns
+    └── *_<ClassName>.csv     # One CSV per custom data class
 ```
 
 ### Expected CSV columns

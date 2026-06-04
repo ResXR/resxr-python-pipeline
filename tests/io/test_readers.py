@@ -328,13 +328,22 @@ class TestLoadCustomTablesJson:
         assert load_custom_tables_json(tmp_path / "nope.json") is None
 
     def test_malformed_json_returns_none(self, tmp_path):
-        bad = tmp_path / "custom_tables.json"
+        bad = tmp_path / "CustomTables.json"
         bad.write_text("{not valid")
         assert load_custom_tables_json(bad) is None
 
     def test_missing_required_key_returns_none(self, tmp_path):
-        bad = tmp_path / "custom_tables.json"
-        bad.write_text('[{"row_count": 1, "columns": []}]')  # no class_name
+        bad = tmp_path / "CustomTables.json"
+        # Column missing the mandatory "Format" field voids the whole file.
+        bad.write_text(
+            '{"CustomTables":{"ChoiceEvent":{"RowCount":1,'
+            '"Columns":{"x":{"Description":"d"}}}}}'
+        )
+        assert load_custom_tables_json(bad) is None
+
+    def test_missing_customtables_wrapper_returns_none(self, tmp_path):
+        bad = tmp_path / "CustomTables.json"
+        bad.write_text('[{"class_name": "X", "row_count": 1}]')  # old array format
         assert load_custom_tables_json(bad) is None
 
 
@@ -498,7 +507,7 @@ class TestLoadSessionCustomTableLogging:
         pd.DataFrame(
             {"onset": [0.0, 1.0][:choice_rows], "duration": [0.0, 0.0][:choice_rows]}
         ).to_csv(custom / "sess_ChoiceEvent.csv", index=False)
-        (custom / "custom_tables.json").write_text(tables_json)
+        (custom / "sess_CustomTables.json").write_text(tables_json)
         return d
 
     def test_row_count_mismatch_logs_warning(self, tmp_path, caplog):
@@ -507,7 +516,7 @@ class TestLoadSessionCustomTableLogging:
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
-            tables_json='[{"class_name":"ChoiceEvent","row_count":5,"columns":[]}]',
+            tables_json='{"CustomTables":{"ChoiceEvent":{"RowCount":5,"Columns":{}}}}',
         )
         with caplog.at_level(logging.WARNING):
             load_session(d, self._config(tmp_path))
@@ -520,8 +529,7 @@ class TestLoadSessionCustomTableLogging:
             tmp_path,
             choice_rows=1,
             tables_json=(
-                '[{"class_name":"ChoiceEvent","row_count":1,"columns":[]},'
-                '{"class_name":"Ghost","row_count":2,"columns":[]}]'
+                '{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{}},"Ghost":{"RowCount":2,"Columns":{}}}}'
             ),
         )
         with caplog.at_level(logging.WARNING):
@@ -535,7 +543,7 @@ class TestLoadSessionCustomTableLogging:
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
-            tables_json='[{"class_name":"ChoiceEvent","row_count":1,"columns":[]}]',
+            tables_json='{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{}}}}',
         )
         with caplog.at_level(logging.WARNING):
             load_session(d, self._config(tmp_path))
@@ -548,12 +556,12 @@ class TestLoadSessionCustomTableLogging:
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
-            tables_json='[{"class_name":"ChoiceEvent","row_count":1,"columns":[]}]',
+            tables_json='{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{}}}}',
         )
-        # A stray file that sorts alphabetically before "custom_tables.json".
+        # A stray file that sorts alphabetically before "sess_CustomTables.json".
         # If it were picked, parsing would fail and custom_tables would be None.
-        (d / "custom_tables" / "backup_custom_tables.json").write_text("not valid json")
+        (d / "custom_tables" / "backup_CustomTables.json").write_text("not valid json")
         with caplog.at_level(logging.WARNING):
             session = load_session(d, self._config(tmp_path))
-        assert session.custom_tables is not None  # exact custom_tables.json was used
+        assert session.custom_tables is not None  # exact sess_CustomTables.json was used
         assert "Multiple files matching" in caplog.text

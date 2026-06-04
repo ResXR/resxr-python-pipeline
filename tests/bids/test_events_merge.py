@@ -55,12 +55,43 @@ class TestMergeEvents:
         with pytest.raises(ResXRError):
             merge_events(None, {"BadClass": bad})
 
-    def test_cross_class_collision_raises_naming_both(self):
+    def test_cross_class_collision_allowed_with_identical_metadata(self):
         a = pd.DataFrame({"onset": [1.0], "duration": [0.0], "shared": [1]})
         b = pd.DataFrame({"onset": [2.0], "duration": [0.0], "shared": [2]})
+        
+        # Create identical schemas for the shared column
+        col_info_a = ColumnInfoEntry(name="shared", description="Same", format="int")
+        col_info_b = ColumnInfoEntry(name="shared", description="Same", format="int")
+        
+        schema_a = CustomTableSchema(class_name="ClassA", row_count=1, columns=[col_info_a])
+        schema_b = CustomTableSchema(class_name="ClassB", row_count=1, columns=[col_info_b])
+        
+        out = merge_events(None, {"ClassA": a, "ClassB": b}, [schema_a, schema_b])
+        assert "shared" in out.columns
+        assert list(out["shared"]) == [1, 2]
+
+    def test_cross_class_collision_raises_on_metadata_mismatch(self):
+        a = pd.DataFrame({"onset": [1.0], "duration": [0.0], "shared": [1]})
+        b = pd.DataFrame({"onset": [2.0], "duration": [0.0], "shared": [2]})
+        
+        # Create clashing schemas for the shared column (different descriptions)
+        col_info_a = ColumnInfoEntry(name="shared", description="Thing A", format="int")
+        col_info_b = ColumnInfoEntry(name="shared", description="Thing B", format="int")
+        
+        schema_a = CustomTableSchema(class_name="ClassA", row_count=1, columns=[col_info_a])
+        schema_b = CustomTableSchema(class_name="ClassB", row_count=1, columns=[col_info_b])
+        
+        with pytest.raises(ResXRError) as exc:
+            merge_events(None, {"ClassA": a, "ClassB": b}, [schema_a, schema_b])
+        assert "conflicting metadata" in str(exc.value)
+
+    def test_cross_class_collision_raises_on_strict_fallback(self):
+        a = pd.DataFrame({"onset": [1.0], "duration": [0.0], "shared": [1]})
+        b = pd.DataFrame({"onset": [2.0], "duration": [0.0], "shared": [2]})
+        
         with pytest.raises(ResXRError) as exc:
             merge_events(None, {"ClassA": a, "ClassB": b})
-        assert "ClassA" in str(exc.value) and "ClassB" in str(exc.value)
+        assert "no CustomTables sidecar json was provided" in str(exc.value)
 
     def test_gaps_are_string_na_not_nan(self):
         out = merge_events(_native(), {"ChoiceEvent": _choice()})
