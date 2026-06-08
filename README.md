@@ -155,7 +155,7 @@ session_folder/
 ├── *_FaceExpressionData.csv  # Face tracking (FACS blendshapes) - optional
 ├── *_Events.csv              # Task/stimulus event markers - optional
 ├── *_SessionMetadata.json    # Recording configuration & timestamps
-└── custom_tables/            # Experiment-defined custom data classes - optional
+└── *_CustomTables/           # Experiment-defined custom data classes - optional
     ├── *_CustomTables.json   # Schema describing each custom table's columns
     └── *_<ClassName>.csv     # One CSV per custom data class
 ```

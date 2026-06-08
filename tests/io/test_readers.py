@@ -412,6 +412,20 @@ class TestLoadCustomClassCsv:
         with pytest.raises(DataLoadError):
             load_custom_class_csv(p)
 
+    def test_bool_and_int_columns_preserved_as_text(self, tmp_path):
+        # Non-onset/duration columns keep their exact source token so the events
+        # merge cannot upcast them to float (false/true -> 0.0/1.0, 0 -> 0.0).
+        p = tmp_path / "Maze.csv"
+        p.write_text(
+            "onset,duration,flag,trial,coin\n5.0,1.0,false,0,-0.752\n7.0,1.0,true,1,0.7520003\n"
+        )
+        df = load_custom_class_csv(p)
+        assert df["flag"].tolist() == ["false", "true"]
+        assert df["trial"].tolist() == ["0", "1"]
+        assert df["coin"].tolist() == ["-0.752", "0.7520003"]
+        # onset/duration are still coerced to float for sorting.
+        assert df["onset"].tolist() == [5.0, 7.0]
+
 
 # ===========================================================================
 # discover_sessions
@@ -491,7 +505,6 @@ class TestLoadSessionCustomTableLogging:
             face_data_pattern="*_FaceExpressionData.csv",
             metadata_pattern="session_metadata.json",
             events_data_pattern="*_EventsData.csv",
-            custom_tables_dir="custom_tables",
         )
 
     def _session_dir(self, tmp_path: Path, choice_rows: int, tables_json: str) -> Path:
@@ -501,7 +514,7 @@ class TestLoadSessionCustomTableLogging:
         pd.DataFrame({"timeSinceStartup": [1.0, 1.1], "Node_Head_px": [0.1, 0.2]}).to_csv(
             d / "sess_ContinuousData.csv", index=False
         )
-        custom = d / "custom_tables"
+        custom = d / "sess_CustomTables"
         custom.mkdir()
         pd.DataFrame(
             {"onset": [0.0, 1.0][:choice_rows], "duration": [0.0, 0.0][:choice_rows]}
@@ -559,7 +572,7 @@ class TestLoadSessionCustomTableLogging:
         )
         # A stray file that sorts alphabetically before "sess_CustomTables.json".
         # If it were picked, parsing would fail and custom_tables would be None.
-        (d / "custom_tables" / "backup_CustomTables.json").write_text("not valid json")
+        (d / "sess_CustomTables" / "backup_CustomTables.json").write_text("not valid json")
         with caplog.at_level(logging.WARNING):
             session = load_session(d, self._config(tmp_path))
         assert session.custom_tables is not None  # exact sess_CustomTables.json was used

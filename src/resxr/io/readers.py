@@ -318,13 +318,23 @@ def find_custom_class_csvs(custom_dir: Path, recording_id: str) -> dict[str, Pat
 
 
 def load_custom_class_csv(path: Path) -> pd.DataFrame:
-    """Load one custom-class CSV. Requires numeric lowercase onset & duration."""
+    """Load one custom-class CSV. Requires numeric lowercase onset & duration.
+
+    All columns are read as strings so each cell keeps its exact source token
+    (e.g. ``false``/``true``, ``0``, ``-0.752``). These columns flow verbatim
+    into the wide events.tsv, where different classes contribute different
+    columns. Reading them as text avoids pandas upcasting bool/int columns to
+    float when the merge introduces gap-filling NaNs (which would otherwise turn
+    ``false``/``true`` into ``0.0``/``1.0`` and ``0`` into ``0.0``). Only
+    ``onset``/``duration`` are coerced to float for sorting.
+    """
     try:
         df = pd.read_csv(
             path,
             na_values=["", "NaN", "null", "None"],
             low_memory=False,
             encoding="utf-8-sig",
+            dtype=str,
         )
     except Exception as e:
         raise DataLoadError(f"Failed to load custom class CSV {path}: {e}") from e
@@ -424,8 +434,11 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     if files.events is not None:
         raw_events = load_events_data(files.events)
 
-    # Custom data classes: a dedicated subfolder holding custom_tables.json and CSVs.
-    custom_dir = session_dir / config.custom_tables_dir
+    # Custom data classes live in a "{session_id}_CustomTables" subfolder holding the
+    # CustomTables sidecar and the custom data-class CSVs.
+    custom_dir = session_dir / f"{metadata.session_id}_CustomTables"
+    if not custom_dir.is_dir():
+        logger.error("Custom tables folder not found: %s", custom_dir)
     custom_csvs = find_custom_class_csvs(custom_dir, metadata.session_id)
     custom_tables_data = {name: load_custom_class_csv(p) for name, p in custom_csvs.items()}
 

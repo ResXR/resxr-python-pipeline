@@ -52,10 +52,6 @@ input:
   metadata_pattern: "*SessionMetadata.json"
   events_data_pattern: "*_Events.csv"
 
-  # Subfolder within each source dir holding custom_tables.json and the
-  # custom data-class CSVs.
-  custom_tables_dir: "custom_tables"
-
 # Output Configuration
 # --------------------
 # Specifies BIDS output settings
@@ -77,17 +73,17 @@ output:
 # Maps source directories to BIDS subject/session identifiers.
 # If empty, sessions will be auto-discovered and numbered.
 session_mappings:
-  - source_dir: "test_data"
+  - source_dir: "Demo_Data/Binary/2026.06.08_16-57"
     subject_id: "01"
     session_label: "01"
 
-  - source_dir: "Demo_Data/BinaryChoice/001"
+  - source_dir: "Demo_Data/Maze/2026.06.08_16-58"
     subject_id: "02"
     session_label: "01"
 
-  # - source_dir: "17.9.25_hands_TEST_002"
-  #   subject_id: "02"
-  #   session_label: "01"
+  - source_dir: "Demo_Data/Museum/2026.06.08_17-05"
+    subject_id: "03"
+    session_label: "01"
 
 # Device Configuration
 # --------------------

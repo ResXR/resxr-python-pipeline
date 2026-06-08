@@ -135,23 +135,6 @@ class TestConfigFields:
         assert isinstance(ic.metadata_pattern, str)
         assert isinstance(ic.events_data_pattern, str)
 
-
-def test_input_config_custom_tables_dir_default(minimal_config_dict):
-    from resxr.core.config import PipelineConfig
-
-    cfg = PipelineConfig.model_validate(minimal_config_dict)
-    assert cfg.input.custom_tables_dir == "custom_tables"
-
-
-def test_input_config_custom_tables_dir_parsed(minimal_config_dict):
-    from resxr.core.config import PipelineConfig
-
-    d = dict(minimal_config_dict)
-    d["input"] = dict(d["input"])
-    d["input"]["custom_tables_dir"] = "events_extra"
-    cfg = PipelineConfig.model_validate(d)
-    assert cfg.input.custom_tables_dir == "events_extra"
-
     def test_output_config_fields(self, pipeline_config):
         """OutputConfig fields are accessible and correctly typed."""
         oc = pipeline_config.output

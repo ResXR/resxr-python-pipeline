@@ -45,6 +45,29 @@ class TestMergeEvents:
         assert list(out.columns) == STANDARD_COLS
         assert len(out) == 0
 
+    def test_custom_text_columns_not_upcast_by_gap_fill(self):
+        # Custom columns arrive as strings (load_custom_class_csv reads dtype=str).
+        # When native rows lack these columns, reindex introduces NaN; the merge
+        # must fill gaps with "n/a" WITHOUT turning false/true into 0.0/1.0 or
+        # 0 into 0.0 on the rows that do have values.
+        custom = pd.DataFrame(
+            {
+                "onset": [5.0, 7.0],
+                "duration": [1.0, 1.0],
+                "flag": ["false", "true"],
+                "trial": ["0", "1"],
+            }
+        )
+        out = merge_events(_native(), {"Maze": custom})
+        maze = out[out["name"] == "Maze"]
+        assert maze["flag"].tolist() == ["false", "true"]
+        assert maze["trial"].tolist() == ["0", "1"]
+        # Native rows lack the custom columns -> "n/a", never 0.0/1.0.
+        native_rows = out[out["name"].isin(["start", "end"])]
+        assert set(native_rows["flag"]) == {"n/a"}
+        assert "0.0" not in out["flag"].tolist()
+        assert "1.0" not in out["flag"].tolist()
+
     def test_native_null_onset_raises(self):
         bad = pd.DataFrame({"name": ["x"], "onset": [float("nan")], "duration": [0.0]})
         with pytest.raises(DataLoadError):

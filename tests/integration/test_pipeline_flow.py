@@ -619,7 +619,7 @@ def test_events_at_session_root_with_custom_class(tmp_path, minimal_config_dict)
     data_dir = tmp_path / "sessions"
     bids_root = tmp_path / "bids_out"
     src = _write_session_dir(data_dir, "sess_cc", session_id="CC", with_events=True)
-    custom = src / "custom_tables"
+    custom = src / "CC_CustomTables"
     custom.mkdir()
     pd.DataFrame({"onset": [0.25], "duration": [0.0], "reaction_time": [0.3]}).to_csv(
         custom / "CC_ChoiceEvent.csv", index=False
