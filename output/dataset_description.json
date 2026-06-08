@@ -1,7 +1,3 @@
-{
-  "Name": "ResXR VR Tracking Dataset",
-  "BIDSVersion": "1.10.1",
-  "DatasetType": "raw",
-  "License": "CC0",
-  "Authors": []
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:db4236526cf3bd4e8e08b329868a33f699970f167a9fd70edccb1c69eb3c6e84
+size 130

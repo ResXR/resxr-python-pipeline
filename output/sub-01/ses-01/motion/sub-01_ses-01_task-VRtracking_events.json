@@ -1,14 +1,3 @@
-{
-  "onset": {
-    "Description": "Onset time of event in seconds relative to recording start",
-    "Units": "s"
-  },
-  "duration": {
-    "Description": "Duration of event in seconds (0 for instantaneous events)",
-    "Units": "s"
-  },
-  "trial_type": {
-    "Description": "Type or name of the event",
-    "LongName": "Event Type"
-  }
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:24da96bdc5e1d2645ade28eb24f76d0f1d499805329d0197bfce330b2f039871
+size 336

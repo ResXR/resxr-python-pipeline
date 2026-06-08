@@ -1,5 +1,3 @@
-filename	acq_time
-motion/sub-02_ses-01_task-VRtracking_tracksys-Head_motion.tsv	2026-06-04T09:55:15.000
-motion/sub-02_ses-01_task-VRtracking_tracksys-Hands_motion.tsv	2026-06-04T09:55:15.000
-motion/sub-02_ses-01_task-VRtracking_tracksys-Eyes_motion.tsv	2026-06-04T09:55:15.000
-motion/sub-02_ses-01_task-VRtracking_tracksys-Face_motion.tsv	2026-06-04T09:55:15.000
+version https://git-lfs.github.com/spec/v1
+oid sha256:78b1d7b1dacf55dbf95c1975fcbd49640c15acce83adca86171bcf836e10b179
+size 363

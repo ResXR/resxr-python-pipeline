@@ -1,4 +1,3 @@
-*.html
-*.png
-*.jpg
-.git/
+version https://git-lfs.github.com/spec/v1
+oid sha256:e88ed59e3a6a650a81da7609121a792702e4892161f051a14bf3c692bb9164d9
+size 25
