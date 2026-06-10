@@ -5,7 +5,8 @@ An open-source toolkit for standardized XR behavioral research.
 Converts Unity/Meta Quest tracking data to BIDS-compliant format.
 """
 
-__version__ = "0.1.0"
+from importlib.metadata import version
+__version__ = version("resxr")
 
 from .core import (
     PipelineConfig,
