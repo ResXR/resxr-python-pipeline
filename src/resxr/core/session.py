@@ -239,9 +239,18 @@ class SessionMetadata:
     eyes_enabled: bool = False
     controllers_enabled: bool = False
 
-    # Additional metadata
-    detected_hand_bones: int = 0
-    detected_body_joints: int = 0
+    # Number of columns allocated in the CSV schema at session start (a
+    # compile-time constant, not a live device measurement). Kept for
+    # provenance; surfaced only in sourcedata, not in BIDS sidecars.
+    schema_hand_bones: int = 0
+    schema_body_joints: int = 0
+    schema_face_expressions: int = 0
+
+    # Raw device/OS strings. Folded into BIDS SoftwareVersions / DeviceSerialNumber.
+    manufacturers_model_name_raw: str = ""
+    software_versions_raw: str = ""
+    horizon_os_version: str = ""
+    device_serial_number: str = ""
 
 
 @dataclass

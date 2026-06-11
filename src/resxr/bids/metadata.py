@@ -68,12 +68,20 @@ def generate_motion_json(
     # Count tracked points
     tracked_points = count_tracked_points(data_cols)
 
-    # Build software version string
+    # Build software version string. Folds the session's OS/runtime strings into
+    # the standard BIDS SoftwareVersions field (BIDS has no dedicated OS field).
     software_versions = []
     if session.metadata.unity_version:
         software_versions.append(f"Unity {session.metadata.unity_version}")
     if session.metadata.ovrplugin_version:
         software_versions.append(f"OVR Plugin v{session.metadata.ovrplugin_version}")
+    # Meta Horizon OS release; skip Play Mode / PCVR / read-failure sentinels.
+    horizon_os = session.metadata.horizon_os_version
+    if horizon_os and horizon_os not in {"editor", "n/a", "unknown"}:
+        software_versions.append(f"Horizon OS {horizon_os}")
+    # Full Android OS / build string, if captured.
+    if session.metadata.software_versions_raw:
+        software_versions.append(session.metadata.software_versions_raw)
     software_str = ", ".join(software_versions) if software_versions else "n/a"
 
     # Determine task description: use config override, or fall back to system description
@@ -100,6 +108,12 @@ def generate_motion_json(
         "MotionChannelCount": len(data_cols),
         "TrackedPointsCount": tracked_points,
     }
+
+    # DeviceSerialNumber is RECOMMENDED but typically unavailable: Meta blocks
+    # serial reads on Android 10+. Emit only when known; BIDS prefers omitting an
+    # unknown optional field over writing an empty string.
+    if session.metadata.device_serial_number:
+        metadata["DeviceSerialNumber"] = session.metadata.device_serial_number
 
     # Add channel type counts
     metadata.update(channel_counts)

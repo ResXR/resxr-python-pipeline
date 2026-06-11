@@ -59,8 +59,8 @@ def _minimal_session(streams: dict[TrackingSystem, TrackingStream] | None = None
         hands_enabled=False,
         eyes_enabled=False,
         controllers_enabled=False,
-        detected_hand_bones=0,
-        detected_body_joints=0,
+        schema_hand_bones=0,
+        schema_body_joints=0,
     )
     if streams is None:
         streams = {TrackingSystem.HEAD: _head_stream()}

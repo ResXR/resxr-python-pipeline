@@ -307,8 +307,8 @@ def session_metadata() -> SessionMetadata:
         hands_enabled=True,
         eyes_enabled=True,
         controllers_enabled=False,
-        detected_hand_bones=24,
-        detected_body_joints=0,
+        schema_hand_bones=24,
+        schema_body_joints=0,
     )
 
 
@@ -558,8 +558,8 @@ def tmp_metadata_json(tmp_path) -> Path:
         "hands_enabled": True,
         "eyes_enabled": True,
         "controllers_enabled": False,
-        "detected_hand_bones": 24,
-        "detected_body_joints": 0,
+        "schema_hand_bones": 24,
+        "schema_body_joints": 0,
     }
     path = tmp_path / "session_metadata.json"
     with open(path, "w") as f:

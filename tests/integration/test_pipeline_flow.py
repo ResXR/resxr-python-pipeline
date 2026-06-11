@@ -30,8 +30,8 @@ _REAL_CSV_METADATA = {
     "hands_enabled": True,
     "eyes_enabled": True,
     "controllers_enabled": True,
-    "detected_hand_bones": 24,
-    "detected_body_joints": 70,
+    "schema_hand_bones": 24,
+    "schema_body_joints": 70,
 }
 
 _REPO_REAL_CSV = (
@@ -86,8 +86,8 @@ def _write_session_dir(
         "hands_enabled": True,
         "eyes_enabled": False,
         "controllers_enabled": False,
-        "detected_hand_bones": 24,
-        "detected_body_joints": 0,
+        "schema_hand_bones": 24,
+        "schema_body_joints": 0,
     }
     with open(session_dir / "session_metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f)
@@ -326,8 +326,8 @@ def test_motion_tsv_missing_values_use_config_token(tmp_path, minimal_config_dic
                 "hands_enabled": False,
                 "eyes_enabled": False,
                 "controllers_enabled": False,
-                "detected_hand_bones": 0,
-                "detected_body_joints": 0,
+                "schema_hand_bones": 0,
+                "schema_body_joints": 0,
             },
             f,
         )

@@ -241,8 +241,16 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
         hands_enabled=data.get("hands_enabled", False),
         eyes_enabled=data.get("eyes_enabled", False),
         controllers_enabled=data.get("controllers_enabled", False),
-        detected_hand_bones=data.get("detected_hand_bones", 0),
-        detected_body_joints=data.get("detected_body_joints", 0),
+        # New schema_* keys; fall back to legacy detected_* names for older sessions.
+        schema_hand_bones=data.get("schema_hand_bones", data.get("detected_hand_bones", 0)),
+        schema_body_joints=data.get("schema_body_joints", data.get("detected_body_joints", 0)),
+        schema_face_expressions=data.get(
+            "schema_face_expressions", data.get("detected_face_expr_count", 0)
+        ),
+        manufacturers_model_name_raw=data.get("manufacturers_model_name_raw", ""),
+        software_versions_raw=data.get("software_versions_raw", ""),
+        horizon_os_version=data.get("horizon_os_version", ""),
+        device_serial_number=data.get("device_serial_number", ""),
     )
 
 
