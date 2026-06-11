@@ -73,15 +73,15 @@ output:
 # Maps source directories to BIDS subject/session identifiers.
 # If empty, sessions will be auto-discovered and numbered.
 session_mappings:
-  - source_dir: "Demo_Data/Binary/2026.06.08_16-57"
+  - source_dir: "Demo_Data/Binary/2026.06.10_18-22"
     subject_id: "01"
     session_label: "01"
 
-  - source_dir: "Demo_Data/Maze/2026.06.08_16-58"
+  - source_dir: "Demo_Data/Maze/2026.06.10_18-32"
     subject_id: "02"
     session_label: "01"
 
-  - source_dir: "Demo_Data/Museum/2026.06.08_17-05"
+  - source_dir: "Demo_Data/Museum/2026.06.10_18-42"
     subject_id: "03"
     session_label: "01"
 
