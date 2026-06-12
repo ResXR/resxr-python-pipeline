@@ -7,10 +7,15 @@
 # ---------------------------
 # Values for BIDS metadata files
 bids:
-  missing_values: "NaN"
+  missing_values: "n/a"
   dataset_type: "raw"
   license: "CC0"
-  authors: []
+  authors:
+    - "ResXR Contributors"
+  readme_text: |
+    This dataset contains virtual reality tracking data processed by the ResXR toolkit.
+
+    For more information about the ResXR project, please visit https://resxr.org.
   reference_frame:
     description: "Global VR playspace coordinate system. Positive X is right, Y is up (superior), Z is forward (anterior)"
     rotation_rule: "left-hand"

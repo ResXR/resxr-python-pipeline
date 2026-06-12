@@ -170,6 +170,7 @@ class BIDSConfig(ConfigModel):
     dataset_type: str
     license: str
     authors: list[str] = Field(default_factory=list)
+    readme_text: str = ""
     reference_frame: ReferenceFrameConfig
 
 

@@ -196,13 +196,16 @@ def generate_dataset_description(
     Dict[str, Any]
         JSON-serializable metadata dictionary
     """
-    return {
+    desc = {
         "Name": dataset_name,
         "BIDSVersion": bids_version,
         "DatasetType": bids_config.dataset_type,
         "License": bids_config.license,
-        "Authors": bids_config.authors,
     }
+    if bids_config.authors:
+        desc["Authors"] = bids_config.authors
+        
+    return desc
 
 
 def generate_derivative_description(
