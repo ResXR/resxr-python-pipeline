@@ -160,6 +160,22 @@ session_folder/
     └── *_<ClassName>.csv     # One CSV per custom data class
 ```
 
+### Software version metadata (engine-agnostic)
+
+Every scalar `*version*` key found in `*_SessionMetadata.json` (e.g.
+`unity_version`, `horizon_os_version`, `software_versions_raw`) is captured
+automatically, whatever the engine or headset. The captured versions are:
+
+- listed in the HTML report header under **Software versions**, and
+- folded into the BIDS `SoftwareVersions` sidecar field.
+
+Known vendor keys (Unity, OVR Plugin, Horizon OS) get curated labels via the
+`_KNOWN_VERSION_FORMATS` table in `src/resxr/bids/metadata.py`; any other
+recorder's keys (e.g. an Unreal session's `unreal_engine_version`) flow
+through with auto-generated labels. Supporting a new headset therefore needs
+no code changes — add a table row only for a prettier label or to filter
+sentinel values.
+
 ### Expected CSV columns
 
 The pipeline automatically identifies tracking systems by column prefixes:

@@ -9,6 +9,11 @@ from __future__ import annotations
 
 from enum import Enum
 
+# Name of the recorder's global engine clock column (ResXR CSV format
+# contract). Every validation check, masking step, and report onset
+# computation keys on this single constant.
+GLOBAL_CLOCK_COLUMN = "timeSinceStartup"
+
 
 class TrackingSystem(Enum):
     """
@@ -36,7 +41,7 @@ SYSTEM_COLUMN_PREFIXES: dict[TrackingSystem, list[str]] = {
         "UserPresent",
         "recenterEvent",
         "shouldRecenter",
-        "timeSinceStartup",
+        GLOBAL_CLOCK_COLUMN,
         "TrackingOriginChange_",
         "TrackingTransform_",
     ],

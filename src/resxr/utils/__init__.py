@@ -53,6 +53,25 @@ def format_duration(seconds: float) -> str:
         return f"{hours}h {minutes}m {secs:.0f}s"
 
 
+def version_label(key: str) -> str:
+    """Turn a metadata JSON key into a display label, engine-agnostically.
+
+    Used for the ``software_versions`` map on ``SessionMetadata`` (every
+    scalar ``*version*`` key captured from SessionMetadata.json), so labels
+    work for any engine without per-device code:
+
+    ``unity_version`` -> "Unity", ``horizon_os_version`` -> "Horizon OS",
+    ``software_versions_raw`` -> "Software".
+    """
+    label = key.removesuffix("_raw")
+    for suffix in ("_versions", "_version"):
+        label = label.removesuffix(suffix)
+    acronyms = {"os", "api", "sdk", "xr", "ovr"}
+    return " ".join(
+        w.upper() if w in acronyms else w.capitalize() for w in label.split("_")
+    )
+
+
 def find_first_nonzero_index(timestamps: np.ndarray) -> int | None:
     """
     Return the positional index of the first finite non-zero timestamp.
@@ -179,6 +198,7 @@ def find_internal_zero_blocks(timestamps: np.ndarray) -> list[tuple[int, int]]:
 
 __all__ = [
     "format_duration",
+    "version_label",
     "find_recording_onset",
     "find_first_nonzero_index",
     "find_last_nonzero_index",

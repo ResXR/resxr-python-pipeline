@@ -196,7 +196,7 @@ class TestGenerateMotionJson:
 
     def test_software_versions_folds_in_horizon_os(self, head_stream, full_session):
         """horizon_os_version is appended to the SoftwareVersions string."""
-        full_session.metadata.horizon_os_version = "2.4"
+        full_session.metadata.software_versions["horizon_os_version"] = "2.4"
         result = generate_motion_json(
             stream=head_stream,
             session=full_session,
@@ -212,7 +212,7 @@ class TestGenerateMotionJson:
         self, sentinel, head_stream, full_session
     ):
         """Editor / PCVR / read-failure sentinels are not folded into SoftwareVersions."""
-        full_session.metadata.horizon_os_version = sentinel
+        full_session.metadata.software_versions["horizon_os_version"] = sentinel
         result = generate_motion_json(
             stream=head_stream,
             session=full_session,
@@ -225,7 +225,7 @@ class TestGenerateMotionJson:
 
     def test_software_versions_folds_in_raw_os_string(self, head_stream, full_session):
         """software_versions_raw (full Android/build string) is appended verbatim."""
-        full_session.metadata.software_versions_raw = "Android OS 14 / API-34"
+        full_session.metadata.software_versions["software_versions_raw"] = "Android OS 14 / API-34"
         result = generate_motion_json(
             stream=head_stream,
             session=full_session,
@@ -235,6 +235,23 @@ class TestGenerateMotionJson:
             system_descriptions={},
         )
         assert "Android OS 14 / API-34" in result["SoftwareVersions"]
+
+    def test_software_versions_handles_unknown_engines(self, head_stream, full_session):
+        """Non-Unity/Meta recorders: unknown "*version*" keys are folded into
+        SoftwareVersions with generic labels."""
+        full_session.metadata.software_versions = {
+            "unreal_engine_version": "5.4.2",
+            "openxr_runtime_version": "1.0.34",
+        }
+        result = generate_motion_json(
+            stream=head_stream,
+            session=full_session,
+            task_name="vr",
+            device=_device_config(),
+            bids_config=_bids_config(),
+            system_descriptions={},
+        )
+        assert result["SoftwareVersions"] == "Unreal Engine 5.4.2, Openxr Runtime 1.0.34"
 
     def test_device_serial_number_omitted_when_empty(self, head_stream, full_session):
         """DeviceSerialNumber is omitted entirely when not captured (BIDS convention)."""

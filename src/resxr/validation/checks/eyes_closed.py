@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...core.config import ValidationConfig
-from ...core.constants import TrackingSystem
+from ...core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ..registry import register_check
@@ -65,7 +65,7 @@ class EyesClosedCheck:
         if col_left in df.columns and col_right in df.columns:
             closed_mask = (df[col_left] >= threshold) & (df[col_right] >= threshold)
             if closed_mask.any():
-                if "timeSinceStartup" not in df.columns:
+                if GLOBAL_CLOCK_COLUMN not in df.columns:
                     logger.error(
                         "FACE: timeSinceStartup column missing — "
                         "cannot create eyes_closed flags. "
@@ -73,7 +73,7 @@ class EyesClosedCheck:
                     )
                     return flags
                 face_flags = QualityFlag.from_mask(
-                    timestamps=df["timeSinceStartup"].values,
+                    timestamps=df[GLOBAL_CLOCK_COLUMN].values,
                     boolean_mask=closed_mask.values,
                     check_name=self.name,
                     system=TrackingSystem.FACE,
@@ -90,14 +90,14 @@ class EyesClosedCheck:
 
         # Propagate mask to EYES stream for optional gaze filtering
         if eyes_stream is not None and not eyes_stream.data.empty and closed_segments:
-            if "timeSinceStartup" not in eyes_stream.data.columns:
+            if GLOBAL_CLOCK_COLUMN not in eyes_stream.data.columns:
                 logger.error(
                     "EYES: timeSinceStartup column missing — "
                     "cannot propagate eyes_closed flags to Eyes stream. "
                     "Check alternate_time_columns in pipeline_config.yaml."
                 )
             else:
-                eyes_ts = eyes_stream.data["timeSinceStartup"].values
+                eyes_ts = eyes_stream.data[GLOBAL_CLOCK_COLUMN].values
                 eyes_closed_mask_for_eyes_stream = np.zeros_like(eyes_ts, dtype=bool)
                 for seg_start, seg_end in closed_segments:
                     eyes_closed_mask_for_eyes_stream |= (eyes_ts >= seg_start) & (

@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from ..utils import find_first_nonzero_index, find_last_nonzero_index, find_recording_onset
-from .constants import TrackingSystem
+from .constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -224,10 +224,8 @@ class SessionMetadata:
     session_id: str
     utc_start: datetime | None = None
     device_utc_offset: str = ""
-    unity_version: str = ""
     platform: str = ""
     build_id: str = ""
-    ovrplugin_version: str = ""
     sampling_mode: str = ""
     fixed_delta_time: float = 0.02
     schema_rev: str = ""
@@ -246,11 +244,14 @@ class SessionMetadata:
     schema_body_joints: int = 0
     schema_face_expressions: int = 0
 
-    # Raw device/OS strings. Folded into BIDS SoftwareVersions / DeviceSerialNumber.
-    manufacturers_model_name_raw: str = ""
-    software_versions_raw: str = ""
-    horizon_os_version: str = ""
+    # Raw device serial. Folded into BIDS DeviceSerialNumber.
     device_serial_number: str = ""
+
+    # Engine-agnostic map of every scalar "*version*" key found in
+    # SessionMetadata.json (original key -> value): engine, runtime, and OS
+    # version strings (Unity, Unreal, ...) all flow through to the report
+    # and BIDS SoftwareVersions automatically.
+    software_versions: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -283,7 +284,7 @@ class TrackingStream:
                 f"sampling_frequency must be set for {self.system.value} stream (from config)"
             )
         if not self.data.empty:
-            time_cols = {"timestamp", "timeSinceStartup"}
+            time_cols = {"timestamp", GLOBAL_CLOCK_COLUMN}
             self.channel_count = len([c for c in self.data.columns if c not in time_cols])
             self._compute_effective_rate()
 

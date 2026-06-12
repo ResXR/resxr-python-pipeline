@@ -87,8 +87,18 @@
                 <tr><th>Manufacturer</th><td>{{ manufacturer }}</td></tr>
                 <tr><th>Model</th><td>{{ model_name }}</td></tr>
                 <tr><th>Platform</th><td>{{ platform }}</td></tr>
-                <tr><th>Unity version</th><td>{{ unity_version }}</td></tr>
-                <tr><th>OVR plugin</th><td>{{ ovrplugin_version }}</td></tr>
+                {% if software_versions %}
+                <tr>
+                    <th style="vertical-align:top">Software versions</th>
+                    <td>
+                        <ul style="margin:0; padding-left:1.1rem;">
+                            {% for sw in software_versions %}
+                            <li>{{ sw.label }}: {{ sw.value }}</li>
+                            {% endfor %}
+                        </ul>
+                    </td>
+                </tr>
+                {% endif %}
                 <tr><th>Build ID</th><td>{{ build_id }}</td></tr>
                 <tr><th>Sampling mode</th><td>{{ sampling_mode }}</td></tr>
                 <tr><th>Fixed delta time</th><td>{{ "%.4f"|format(fixed_delta_time) }} s</td></tr>

@@ -23,9 +23,10 @@ import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader
 
 from ..core.config import PipelineConfig, ReportConfig
+from ..core.constants import GLOBAL_CLOCK_COLUMN
 from ..core.logger import get_logger
 from ..core.session import Session
-from ..utils import find_recording_onset
+from ..utils import find_recording_onset, version_label
 
 logger = get_logger(__name__)
 
@@ -132,8 +133,13 @@ class ReportGenerator:
             "manufacturer": config.device.manufacturer if config else "N/A",
             "model_name": config.device.model_name if config else "N/A",
             "platform": session.metadata.platform,
-            "unity_version": session.metadata.unity_version,
-            "ovrplugin_version": session.metadata.ovrplugin_version or "N/A",
+            # Engine-agnostic: every "*version*" key captured from
+            # SessionMetadata.json, whatever the engine/device. Rows
+            # appear/disappear based purely on what the session recorded.
+            "software_versions": [
+                {"label": version_label(key), "value": value}
+                for key, value in session.metadata.software_versions.items()
+            ],
             "build_id": session.metadata.build_id or "N/A",
             "sampling_mode": session.metadata.sampling_mode,
             "fixed_delta_time": session.metadata.fixed_delta_time,
@@ -191,13 +197,13 @@ class ReportGenerator:
         for stream in session.streams.values():
             if stream.data.empty:
                 continue
-            if "timeSinceStartup" not in stream.data.columns:
+            if GLOBAL_CLOCK_COLUMN not in stream.data.columns:
                 logger.warning(
                     f"{stream.system.value}: missing timeSinceStartup column, "
                     "cannot compute global onset for this stream"
                 )
                 continue
-            onset = find_recording_onset(stream.data["timeSinceStartup"].values)
+            onset = find_recording_onset(stream.data[GLOBAL_CLOCK_COLUMN].values)
             if onset is not None:
                 onsets.append(onset)
 

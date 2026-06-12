@@ -40,6 +40,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..core.constants import GLOBAL_CLOCK_COLUMN
 from ..core.logger import get_logger
 from ..core.session import TrackingStream
 from ..utils import find_first_nonzero_index, find_last_nonzero_index
@@ -100,11 +101,11 @@ def apply_quality_masking(
         return data
 
     # Get data columns (exclude time columns - NEVER mask timestamps)
-    time_cols = {"timestamp", "timeSinceStartup"}
+    time_cols = {"timestamp", GLOBAL_CLOCK_COLUMN}
     data_cols = [c for c in data.columns if c not in time_cols]
 
     # Quality flags store timeSinceStartup values; compare against the same clock.
-    if "timeSinceStartup" not in data.columns:
+    if GLOBAL_CLOCK_COLUMN not in data.columns:
         logger.error(
             f"{stream.system.value}: timeSinceStartup column missing — "
             "cannot apply quality masking. "
@@ -113,7 +114,7 @@ def apply_quality_masking(
         return data
 
     # Optimize: Use NumPy arrays for vectorized operations
-    ts_for_mask = data["timeSinceStartup"].values
+    ts_for_mask = data[GLOBAL_CLOCK_COLUMN].values
     data_start, data_end = ts_for_mask.min(), ts_for_mask.max()
 
     # Build column → mask mapping
@@ -199,7 +200,7 @@ def preprocess_stream(
     stream.clean_data = result
 
 
-_INTERNAL_TIME_COLS = {"timestamp", "timeSinceStartup"}
+_INTERNAL_TIME_COLS = {"timestamp", GLOBAL_CLOCK_COLUMN}
 
 
 def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -255,13 +256,13 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
         out.insert(0, "latency", latency)
         logger.debug(f"Added latency channel (onset: {onset:.3f}s)")
 
-    if "timeSinceStartup" in out.columns and len(out) > 0:
-        tsu_vals = out["timeSinceStartup"].values
+    if GLOBAL_CLOCK_COLUMN in out.columns and len(out) > 0:
+        tsu_vals = out[GLOBAL_CLOCK_COLUMN].values
         global_onset_idx = find_first_nonzero_index(tsu_vals)
         global_offset_idx = find_last_nonzero_index(tsu_vals)
         global_onset = float(tsu_vals[global_onset_idx]) if global_onset_idx is not None else 0.0
 
-        latency_global = out["timeSinceStartup"] - global_onset
+        latency_global = out[GLOBAL_CLOCK_COLUMN] - global_onset
         if global_onset_idx is not None and global_onset_idx > 0:
             latency_global.iloc[:global_onset_idx] = np.nan
         if global_offset_idx is not None and global_offset_idx < len(latency_global) - 1:

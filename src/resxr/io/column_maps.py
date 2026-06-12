@@ -19,6 +19,7 @@ LATENCY channel recognition:
 from __future__ import annotations
 
 from ..core.constants import (
+    GLOBAL_CLOCK_COLUMN,
     BIDS_CHANNEL_PATTERNS,
     BIDS_CHANNEL_TYPE_COUNTS,
     COLUMN_SUFFIXES,
@@ -176,7 +177,7 @@ def count_channel_types(columns: list[str]) -> dict[str, int]:
     # Initialize all counts to 0
     type_counts: dict[str, int] = dict.fromkeys(BIDS_CHANNEL_TYPE_COUNTS.values(), 0)
 
-    exclude = {"timestamp", "timeSinceStartup"}
+    exclude = {"timestamp", GLOBAL_CLOCK_COLUMN}
     for col in columns:
         if col in exclude:
             continue
@@ -202,7 +203,7 @@ def count_tracked_points(columns: list[str]) -> int:
         Number of unique tracked points
     """
     # Exclude time-related columns (not physical tracked points)
-    exclude = {"timestamp", "timeSinceStartup", "latency", "latency_global"}
+    exclude = {"timestamp", GLOBAL_CLOCK_COLUMN, "latency", "latency_global"}
     points = set()
     for col in columns:
         if col in exclude:

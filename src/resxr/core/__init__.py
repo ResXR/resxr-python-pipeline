@@ -20,6 +20,7 @@ from .constants import (
     BIDS_CHANNEL_PATTERNS,
     BIDS_CHANNEL_TYPE_COUNTS,
     COLUMN_SUFFIXES,
+    GLOBAL_CLOCK_COLUMN,
     SYSTEM_COLUMN_PREFIXES,
     TrackingSystem,
 )
@@ -45,6 +46,7 @@ from .session import (
 __all__ = [
     # Constants
     "TrackingSystem",
+    "GLOBAL_CLOCK_COLUMN",
     "SYSTEM_COLUMN_PREFIXES",
     "BIDS_CHANNEL_PATTERNS",
     "COLUMN_SUFFIXES",

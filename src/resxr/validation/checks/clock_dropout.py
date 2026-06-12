@@ -22,6 +22,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...core.config import ValidationConfig
+from ...core.constants import GLOBAL_CLOCK_COLUMN
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ...utils import find_internal_zero_blocks
@@ -62,7 +63,7 @@ class ClockDropoutCheck:
         if df.empty or "timestamp" not in df.columns:
             return flags
 
-        if "timeSinceStartup" not in df.columns:
+        if GLOBAL_CLOCK_COLUMN not in df.columns:
             logger.error(
                 "%s: timeSinceStartup column missing — cannot check for clock "
                 "dropouts.  Check alternate_time_columns in pipeline_config.yaml.",
@@ -71,7 +72,7 @@ class ClockDropoutCheck:
             return flags
 
         timestamps = df["timestamp"].values
-        ts_global = df["timeSinceStartup"].values
+        ts_global = df[GLOBAL_CLOCK_COLUMN].values
 
         blocks = find_internal_zero_blocks(timestamps)
         if not blocks:

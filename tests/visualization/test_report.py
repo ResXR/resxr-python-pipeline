@@ -47,10 +47,12 @@ def _head_stream(n: int = 200) -> TrackingStream:
 def _minimal_session(streams: dict[TrackingSystem, TrackingStream] | None = None) -> Session:
     metadata = SessionMetadata(
         session_id="report_test_001",
-        unity_version="2022.3.0f1",
         platform="Android",
         build_id="test_build",
-        ovrplugin_version="60.0.0",
+        software_versions={
+            "unity_version": "2022.3.0f1",
+            "ovrplugin_runtime_version": "60.0.0",
+        },
         sampling_mode="fixed",
         fixed_delta_time=0.011111,
         schema_rev="2.9",

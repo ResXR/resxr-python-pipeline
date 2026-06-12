@@ -14,6 +14,7 @@ from pathlib import Path
 import pandas as pd
 
 from ..core.config import InputConfig
+from ..core.constants import GLOBAL_CLOCK_COLUMN
 from ..core.exceptions import DataLoadError, MissingDataError
 from ..core.logger import get_logger
 from ..core.session import ColumnInfoEntry, CustomTableSchema, Session, SessionMetadata
@@ -53,11 +54,11 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
 
     # Rename timestamp column for consistency
-    if "timeSinceStartup" in df.columns:
-        df = df.rename(columns={"timeSinceStartup": "timestamp"})
-    elif "\ufefftimeSinceStartup" in df.columns:
+    if GLOBAL_CLOCK_COLUMN in df.columns:
+        df = df.rename(columns={GLOBAL_CLOCK_COLUMN: "timestamp"})
+    elif f"\ufeff{GLOBAL_CLOCK_COLUMN}" in df.columns:
         # Handle BOM in column name
-        df = df.rename(columns={"\ufefftimeSinceStartup": "timestamp"})
+        df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
 
     if "timestamp" not in df.columns:
         raise DataLoadError(f"No timestamp column found in {csv_path}")
@@ -98,10 +99,10 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
 
     # Rename timestamp column
-    if "timeSinceStartup" in df.columns:
-        df = df.rename(columns={"timeSinceStartup": "timestamp"})
-    elif "\ufefftimeSinceStartup" in df.columns:
-        df = df.rename(columns={"\ufefftimeSinceStartup": "timestamp"})
+    if GLOBAL_CLOCK_COLUMN in df.columns:
+        df = df.rename(columns={GLOBAL_CLOCK_COLUMN: "timestamp"})
+    elif f"\ufeff{GLOBAL_CLOCK_COLUMN}" in df.columns:
+        df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
 
     if "Face_Status" in df.columns:
         if df["Face_Status"].dtype == object:
@@ -225,14 +226,17 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
         except ValueError:
             logger.warning(f"Could not parse UTC timestamp: {utc_str}")
 
+    # Unity-recorder key; other engines may not emit it, in which case the
+    # 0.02 s default (Unity's 50 Hz fixed update) is only a guess.
+    if "fixedDeltaTime" not in data:
+        logger.warning("SessionMetadata has no 'fixedDeltaTime' key; defaulting to 0.02 s")
+
     return SessionMetadata(
         session_id=data.get("session_id", "unknown"),
         utc_start=utc_start,
         device_utc_offset=data.get("device_utc_offset", ""),
-        unity_version=data.get("unity_version", ""),
         platform=data.get("platform", ""),
         build_id=data.get("build_id", ""),
-        ovrplugin_version=data.get("ovrplugin_runtime_version", ""),
         sampling_mode=data.get("sampling_mode", ""),
         fixed_delta_time=data.get("fixedDeltaTime", 0.02),
         schema_rev=data.get("schema_rev", ""),
@@ -247,10 +251,18 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
         schema_face_expressions=data.get(
             "schema_face_expressions", data.get("detected_face_expr_count", 0)
         ),
-        manufacturers_model_name_raw=data.get("manufacturers_model_name_raw", ""),
-        software_versions_raw=data.get("software_versions_raw", ""),
-        horizon_os_version=data.get("horizon_os_version", ""),
         device_serial_number=data.get("device_serial_number", ""),
+        # Engine-agnostic: collect every scalar "*version*" key so any
+        # engine's version strings (Unity, Unreal, ...) flow through to the
+        # report and BIDS SoftwareVersions without code changes.
+        software_versions={
+            k: str(v).strip()
+            for k, v in data.items()
+            if "version" in k.lower()
+            and isinstance(v, (str, int, float))
+            and not isinstance(v, bool)
+            and str(v).strip()
+        },
     )
 
 

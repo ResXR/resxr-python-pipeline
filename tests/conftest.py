@@ -295,10 +295,12 @@ def session_metadata() -> SessionMetadata:
     """SessionMetadata with HEAD, HANDS, EYES, FACE enabled; BODY and CONTROLLERS disabled."""
     return SessionMetadata(
         session_id="test_session_001",
-        unity_version="2022.3.0f1",
         platform="Android",
         build_id="test_build",
-        ovrplugin_version="60.0.0",
+        software_versions={
+            "unity_version": "2022.3.0f1",
+            "ovrplugin_runtime_version": "60.0.0",
+        },
         sampling_mode="fixed",
         fixed_delta_time=0.011111,
         schema_rev="2.9",

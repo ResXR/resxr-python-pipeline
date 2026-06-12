@@ -9,6 +9,7 @@ from __future__ import annotations
 import numpy as np
 
 from ...core.config import ValidationConfig
+from ...core.constants import GLOBAL_CLOCK_COLUMN
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ...utils import find_first_nonzero_index, find_last_nonzero_index
@@ -45,14 +46,14 @@ class SamplingRateCheck:
         if actual_rate <= 0:
             return flags
 
-        if "timeSinceStartup" not in df.columns:
+        if GLOBAL_CLOCK_COLUMN not in df.columns:
             logger.error(
                 f"{stream.system.value}: timeSinceStartup column missing — "
                 "cannot create sampling_rate flags. "
                 "Check alternate_time_columns in pipeline_config.yaml."
             )
             return flags
-        timestamps = df["timeSinceStartup"].values
+        timestamps = df[GLOBAL_CLOCK_COLUMN].values
 
         onset_idx = find_first_nonzero_index(timestamps)
         offset_idx = find_last_nonzero_index(timestamps)

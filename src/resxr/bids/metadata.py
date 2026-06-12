@@ -14,8 +14,45 @@ from typing import Any
 import pandas as pd
 
 from ..core.config import BIDSConfig, DeviceConfig
+from ..core.constants import GLOBAL_CLOCK_COLUMN
 from ..core.session import Session, TrackingStream
 from ..io.column_maps import count_channel_types, count_tracked_points
+from ..utils import version_label
+
+# Known vendor keys -> curated BIDS formatting, applied in this order.
+# Supporting a new headset/engine is purely additive: append a row here for
+# a pretty label (and optional sentinel values to skip). Keys with no row
+# still flow through with generic labels, so nothing breaks without one.
+_KNOWN_VERSION_FORMATS: tuple[tuple[str, str, frozenset[str]], ...] = (
+    ("unity_version", "Unity {}", frozenset()),
+    ("ovrplugin_runtime_version", "OVR Plugin v{}", frozenset()),
+    # Meta Horizon OS release; skip Play Mode / PCVR / read-failure sentinels.
+    ("horizon_os_version", "Horizon OS {}", frozenset({"editor", "n/a", "unknown"})),
+    # Full Android OS / build string, appended verbatim.
+    ("software_versions_raw", "{}", frozenset()),
+)
+
+
+def _software_versions_str(versions: dict[str, str]) -> str:
+    """Fold the engine-agnostic "*version*" map into one BIDS SoftwareVersions
+    string (BIDS has no dedicated OS field).
+
+    Known vendor keys get curated formatting via ``_KNOWN_VERSION_FORMATS``;
+    any other recorder's keys (e.g. an Unreal session's unreal_engine_version)
+    flow through with generic labels.
+    """
+    sv = dict(versions)
+    # OVR wrapper normally mirrors the runtime version; drop it only when it
+    # is an exact duplicate (if they ever diverge, it flows through below).
+    if sv.get("ovrplugin_wrapper_version") == sv.get("ovrplugin_runtime_version"):
+        sv.pop("ovrplugin_wrapper_version", None)
+    parts = []
+    for key, fmt, skip_values in _KNOWN_VERSION_FORMATS:
+        value = sv.pop(key, "")
+        if value and value not in skip_values:
+            parts.append(fmt.format(value))
+    parts += [f"{version_label(key)} {value}" for key, value in sv.items()]
+    return ", ".join(parts) if parts else "n/a"
 
 
 def generate_motion_json(
@@ -59,7 +96,7 @@ def generate_motion_json(
     else:
         # Fallback: read from stream and exclude internal time columns
         data = stream.get_output_data()
-        exclude = {"timestamp", "timeSinceStartup"}
+        exclude = {"timestamp", GLOBAL_CLOCK_COLUMN}
         data_cols = [c for c in data.columns if c not in exclude]
 
     # Count channels by type
@@ -68,21 +105,7 @@ def generate_motion_json(
     # Count tracked points
     tracked_points = count_tracked_points(data_cols)
 
-    # Build software version string. Folds the session's OS/runtime strings into
-    # the standard BIDS SoftwareVersions field (BIDS has no dedicated OS field).
-    software_versions = []
-    if session.metadata.unity_version:
-        software_versions.append(f"Unity {session.metadata.unity_version}")
-    if session.metadata.ovrplugin_version:
-        software_versions.append(f"OVR Plugin v{session.metadata.ovrplugin_version}")
-    # Meta Horizon OS release; skip Play Mode / PCVR / read-failure sentinels.
-    horizon_os = session.metadata.horizon_os_version
-    if horizon_os and horizon_os not in {"editor", "n/a", "unknown"}:
-        software_versions.append(f"Horizon OS {horizon_os}")
-    # Full Android OS / build string, if captured.
-    if session.metadata.software_versions_raw:
-        software_versions.append(session.metadata.software_versions_raw)
-    software_str = ", ".join(software_versions) if software_versions else "n/a"
+    software_str = _software_versions_str(session.metadata.software_versions)
 
     # Determine task description: use config override, or fall back to system description
     if device.task_description:
@@ -90,7 +113,7 @@ def generate_motion_json(
     else:
         task_description = system_descriptions.get(
             stream.system.value,
-            f"{stream.system.value} tracking from {device.model_name} VR headset",
+            f"{stream.system.value} tracking from {device.model_name}",
         )
 
     metadata = {

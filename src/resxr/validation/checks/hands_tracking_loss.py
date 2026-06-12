@@ -8,7 +8,7 @@ Checks if configured columns (e.g., validity flags) indicate loss, and sets Qual
 from __future__ import annotations
 
 from ...core.config import ValidationConfig
-from ...core.constants import TrackingSystem
+from ...core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ..registry import register_check
@@ -51,14 +51,14 @@ class HandsTrackingLossCheck:
             },
         )
 
-        if "timeSinceStartup" not in df.columns:
+        if GLOBAL_CLOCK_COLUMN not in df.columns:
             logger.error(
                 f"{stream.system.value}: timeSinceStartup column missing — "
                 "cannot create hands_tracking_loss flags. "
                 "Check alternate_time_columns in pipeline_config.yaml."
             )
             return flags
-        ts_for_flags = df["timeSinceStartup"].values
+        ts_for_flags = df[GLOBAL_CLOCK_COLUMN].values
 
         for hand, columns in tracking_flags.items():
             for column in columns:
