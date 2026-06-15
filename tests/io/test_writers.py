@@ -8,7 +8,6 @@ import pandas as pd
 import pytest
 
 from resxr.io.writers import (
-    write_bids_events,
     write_bids_tsv,
     write_channels_tsv,
     write_json,
@@ -34,11 +33,45 @@ def _sample_df() -> pd.DataFrame:
 def _events_df() -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "trial_type": ["start", "end"],
+            "name": ["start", "end"],
             "onset": [0.0, 10.0],
             "duration": [0.0, 0.0],
         }
     )
+
+
+# ===========================================================================
+# Line endings (cross-platform reproducibility)
+# ===========================================================================
+
+
+class TestLineEndingsAreLF:
+    """
+    All BIDS text outputs must use LF line endings on every OS so the dataset is
+    byte-reproducible across Windows and Linux.
+
+    Note: on Linux this passes even without the explicit ``lineterminator`` /
+    ``newline`` arguments (text mode already emits LF); the value of this test is
+    as a cross-platform regression guard, since ``pandas.to_csv`` otherwise
+    defaults to ``os.linesep`` (CRLF on Windows).
+    """
+
+    def test_motion_tsv_is_lf(self, tmp_path):
+        path = tmp_path / "x_motion.tsv"
+        write_motion_tsv(_sample_df(), path, missing_values="n/a")
+        data = path.read_bytes()
+        assert b"\r\n" not in data
+        assert b"\n" in data
+
+    def test_channels_tsv_is_lf(self, tmp_path):
+        path = tmp_path / "x_channels.tsv"
+        write_channels_tsv(_sample_df(), path)
+        assert b"\r\n" not in path.read_bytes()
+
+    def test_json_is_lf(self, tmp_path):
+        path = tmp_path / "x.json"
+        write_json({"a": 1, "b": {"c": 2}}, path)
+        assert b"\r\n" not in path.read_bytes()
 
 
 # ===========================================================================
@@ -256,51 +289,104 @@ class TestWriteParticipantsTsv:
 
 
 class TestWriteBidsEvents:
-    def test_creates_tsv_file(self, tmp_path):
-        """write_bids_events creates the events.tsv file."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        assert path.exists()
-
-    def test_creates_json_sidecar(self, tmp_path):
-        """write_bids_events also creates a _events.json sidecar."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        assert (tmp_path / "events.json").exists()
-
-    def test_required_columns_present(self, tmp_path):
-        """Written TSV has onset, duration, and trial_type columns."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        df = pd.read_csv(path, sep="\t")
-        for col in ("trial_type", "onset", "duration"):
-            assert col in df.columns
-
-    def test_bids_required_columns_are_first(self, tmp_path):
-        """BIDS requires onset first and duration second in events.tsv."""
-        path = tmp_path / "events.tsv"
-        write_bids_events(_events_df(), path)
-        df = pd.read_csv(path, sep="\t")
-        assert list(df.columns[:3]) == ["onset", "duration", "trial_type"]
-
-    def test_missing_required_column_raises(self, tmp_path):
-        """DataFrame missing 'onset' column raises BIDSWriteError."""
-        from resxr.core.exceptions import BIDSWriteError
-
-        bad_df = pd.DataFrame({"trial_type": ["evt"], "duration": [1.0]})
-        with pytest.raises(BIDSWriteError):
-            write_bids_events(bad_df, tmp_path / "events.tsv")
-
-    def test_events_sorted_by_onset(self, tmp_path):
-        """Events in the output file are sorted by onset time."""
-        df = pd.DataFrame(
+    def _wide(self):
+        return pd.DataFrame(
             {
-                "trial_type": ["c", "a", "b"],
-                "onset": [10.0, 0.0, 5.0],
-                "duration": [0.0, 0.0, 0.0],
+                "onset": [0.0, 5.0],
+                "duration": [0.0, 1.0],
+                "name": ["start", "ChoiceEvent"],
+                "reaction_time": ["n/a", 0.3],
             }
         )
+
+    def _sidecar(self):
+        return {"onset": {"Units": "s"}, "name": {"Description": "Event"}}
+
+    def test_writes_tsv_and_json(self, tmp_path):
+        from resxr.io.writers import write_bids_events
+
         path = tmp_path / "events.tsv"
-        write_bids_events(df, path)
-        df_read = pd.read_csv(path, sep="\t")
-        assert list(df_read["onset"]) == sorted(df_read["onset"])
+        write_bids_events(self._wide(), path, self._sidecar())
+        assert path.exists()
+        assert (tmp_path / "events.json").exists()
+
+    def test_extra_columns_not_dropped(self, tmp_path):
+        from resxr.io.writers import write_bids_events
+
+        path = tmp_path / "events.tsv"
+        write_bids_events(self._wide(), path, self._sidecar())
+        df = pd.read_csv(path, sep="\t")
+        assert "reaction_time" in df.columns
+        assert "name" in df.columns
+        assert "trial_type" not in df.columns
+
+    def test_sidecar_content_matches(self, tmp_path):
+        import json as _json
+
+        from resxr.io.writers import write_bids_events
+
+        path = tmp_path / "events.tsv"
+        write_bids_events(self._wide(), path, self._sidecar())
+        assert _json.loads((tmp_path / "events.json").read_text()) == self._sidecar()
+
+    def test_missing_required_column_raises(self, tmp_path):
+        from resxr.core.exceptions import BIDSWriteError
+        from resxr.io.writers import write_bids_events
+
+        bad = pd.DataFrame({"name": ["x"], "duration": [1.0]})
+        with pytest.raises(BIDSWriteError):
+            write_bids_events(bad, tmp_path / "events.tsv", {})
+
+    def test_non_tsv_path_raises_valueerror(self, tmp_path):
+        from resxr.io.writers import write_bids_events
+
+        with pytest.raises(ValueError):
+            write_bids_events(self._wide(), tmp_path / "events.csv", {})
+
+
+# ===========================================================================
+# copy_sourcedata
+# ===========================================================================
+
+
+class TestCopySourcedata:
+    def test_copies_verbatim_including_subdirs(self, tmp_path):
+        from resxr.io.writers import copy_sourcedata
+
+        src = tmp_path / "src"
+        (src / "sub").mkdir(parents=True)
+        (src / "a.csv").write_text("x,y\n1,2\n")
+        (src / "sub" / "b.json").write_text('{"k": 1}')
+        dest = tmp_path / "dest"
+        copy_sourcedata(src, dest)
+        assert (dest / "a.csv").read_text() == "x,y\n1,2\n"
+        assert (dest / "sub" / "b.json").read_text() == '{"k": 1}'
+
+    def test_skips_when_dest_nonempty_and_no_overwrite(self, tmp_path, caplog):
+        import logging
+
+        from resxr.io.writers import copy_sourcedata
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.csv").write_text("new")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "existing.csv").write_text("old")
+        with caplog.at_level(logging.WARNING):
+            copy_sourcedata(src, dest, overwrite=False)
+        assert (dest / "existing.csv").exists()
+        assert not (dest / "a.csv").exists()
+        assert "skipping" in caplog.text.lower()
+
+    def test_recopies_when_overwrite_true(self, tmp_path):
+        from resxr.io.writers import copy_sourcedata
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "a.csv").write_text("new")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        (dest / "existing.csv").write_text("old")
+        copy_sourcedata(src, dest, overwrite=True)
+        assert (dest / "a.csv").exists()

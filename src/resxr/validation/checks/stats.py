@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from ...core.config import ValidationConfig
+from ...core.constants import GLOBAL_CLOCK_COLUMN
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ..registry import register_check
@@ -23,7 +24,7 @@ from ..registry import register_check
 logger = get_logger(__name__)
 
 # Timestamp-like columns that should be excluded from numeric stats
-_TIMESTAMP_COLS = {"timestamp", "timeSinceStartup", "Eyes_Time"}
+_TIMESTAMP_COLS = {"timestamp", GLOBAL_CLOCK_COLUMN, "Eyes_Time"}
 
 
 def compute_column_stats(series: pd.Series) -> dict[str, float]:

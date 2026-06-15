@@ -30,8 +30,8 @@ _REAL_CSV_METADATA = {
     "hands_enabled": True,
     "eyes_enabled": True,
     "controllers_enabled": True,
-    "detected_hand_bones": 24,
-    "detected_body_joints": 70,
+    "schema_hand_bones": 24,
+    "schema_body_joints": 70,
 }
 
 _REPO_REAL_CSV = (
@@ -86,8 +86,8 @@ def _write_session_dir(
         "hands_enabled": True,
         "eyes_enabled": False,
         "controllers_enabled": False,
-        "detected_hand_bones": 24,
-        "detected_body_joints": 0,
+        "schema_hand_bones": 24,
+        "schema_body_joints": 0,
     }
     with open(session_dir / "session_metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata, f)
@@ -282,10 +282,10 @@ def test_motion_tsv_columns_match_channels_contract(tmp_path, minimal_config_dic
     assert "latency" in channel_names
     assert "Node_Head_px" in channel_names
 
-    events_file = motion_dir / "sub-01_ses-01_task-vr_events.tsv"
+    events_file = bids_root / "sub-01" / "ses-01" / "sub-01_ses-01_task-vr_events.tsv"
     assert events_file.exists()
     events_df = pd.read_csv(events_file, sep="\t")
-    assert list(events_df.columns[:3]) == ["onset", "duration", "trial_type"]
+    assert list(events_df.columns[:3]) == ["onset", "duration", "name"]
 
     deriv_motion_dir = bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01" / "motion"
     assert not list(deriv_motion_dir.glob("*_events.tsv"))
@@ -326,8 +326,8 @@ def test_motion_tsv_missing_values_use_config_token(tmp_path, minimal_config_dic
                 "hands_enabled": False,
                 "eyes_enabled": False,
                 "controllers_enabled": False,
-                "detected_hand_bones": 0,
-                "detected_body_joints": 0,
+                "schema_hand_bones": 0,
+                "schema_body_joints": 0,
             },
             f,
         )
@@ -594,3 +594,50 @@ def test_csv_data_values_preserved_in_tsv_output(real_csv_pipeline_output):
             checked_columns += 1
 
     assert checked_columns > 0, "No data columns were checked"
+
+
+def test_sourcedata_is_verbatim_copy(tmp_path, minimal_config_dict):
+    """After a run, sourcedata/ holds a verbatim copy of the source CSV."""
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    src = _write_session_dir(data_dir, "sess_sd", session_id="SD", with_events=True)
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[{"source_dir": "sess_sd", "subject_id": "01", "session_label": "01"}],
+    )
+    run(str(cfg))
+    copied = bids_root / "sourcedata" / "sub-01" / "ses-01" / "SD_ContinuousData.csv"
+    assert copied.exists()
+    assert copied.read_bytes() == (src / "SD_ContinuousData.csv").read_bytes()
+
+
+def test_events_at_session_root_with_custom_class(tmp_path, minimal_config_dict):
+    """A custom class CSV is merged into the session-root events file."""
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    src = _write_session_dir(data_dir, "sess_cc", session_id="CC", with_events=True)
+    custom = src / "CC_CustomTables"
+    custom.mkdir()
+    pd.DataFrame({"onset": [0.25], "duration": [0.0], "reaction_time": [0.3]}).to_csv(
+        custom / "CC_ChoiceEvent.csv", index=False
+    )
+    (custom / "CC_CustomTables.json").write_text(
+        '{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":'
+        '{"reaction_time":{"Description":"RT","Units":"s","Format":"float"}}}}}'
+    )
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[{"source_dir": "sess_cc", "subject_id": "01", "session_label": "01"}],
+    )
+    run(str(cfg))
+    events = pd.read_csv(
+        bids_root / "sub-01" / "ses-01" / "sub-01_ses-01_task-vr_events.tsv", sep="\t"
+    )
+    assert "reaction_time" in events.columns
+    assert "ChoiceEvent" in list(events["name"])

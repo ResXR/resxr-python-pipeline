@@ -5,14 +5,11 @@ Produces a dashboard-style quality report.
 
 Time display:
 
-    Quality flags internally store times in per-system ``timestamp``
-    space (which may be an alternate per-system clock, not the global
-    Unity clock).  For the report, all flag times are converted to the
-    global ``timeSinceStartup`` clock via ``np.interp`` and then
-    expressed relative to the global recording onset (first non-zero
-    ``timeSinceStartup`` across all streams).  This gives a single
-    shared timeline starting from 0 so events across different tracking
-    systems are directly comparable.
+    Quality flags store times in ``timeSinceStartup`` space (the global
+    Unity clock).  For the report, flag times are expressed relative to
+    the global recording onset (earliest non-zero ``timeSinceStartup``
+    across all streams), giving a single shared timeline starting from 0
+    so events across different tracking systems are directly comparable.
 """
 
 from __future__ import annotations
@@ -21,15 +18,15 @@ import html
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from jinja2 import Environment, FileSystemLoader
 
 from ..core.config import PipelineConfig, ReportConfig
+from ..core.constants import GLOBAL_CLOCK_COLUMN
 from ..core.logger import get_logger
 from ..core.session import Session
-from ..utils import find_recording_onset
+from ..utils import find_recording_onset, version_label
 
 logger = get_logger(__name__)
 
@@ -136,8 +133,13 @@ class ReportGenerator:
             "manufacturer": config.device.manufacturer if config else "N/A",
             "model_name": config.device.model_name if config else "N/A",
             "platform": session.metadata.platform,
-            "unity_version": session.metadata.unity_version,
-            "ovrplugin_version": session.metadata.ovrplugin_version or "N/A",
+            # Engine-agnostic: every "*version*" key captured from
+            # SessionMetadata.json, whatever the engine/device. Rows
+            # appear/disappear based purely on what the session recorded.
+            "software_versions": [
+                {"label": version_label(key), "value": value}
+                for key, value in session.metadata.software_versions.items()
+            ],
             "build_id": session.metadata.build_id or "N/A",
             "sampling_mode": session.metadata.sampling_mode,
             "fixed_delta_time": session.metadata.fixed_delta_time,
@@ -160,11 +162,15 @@ class ReportGenerator:
             "streams": self._stream_stats(session),
             # Quality flags (times relative to global recording onset)
             "flags": (flags_rel := self._flags_relative_to_onset(session)),
-            # Timeline plot
+            # Timeline plot. Prefer the merged events timeline (native +
+            # custom-table events, matching events.tsv); fall back to native
+            # events when no merge was performed.
             "timeline_html": self._build_timeline(
                 flags_rel,
                 session.total_duration_seconds,
-                session.raw_events_data,
+                session.merged_events_data
+                if session.merged_events_data is not None and not session.merged_events_data.empty
+                else session.raw_events_data,
             ),
             # Footer
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -173,30 +179,20 @@ class ReportGenerator:
         template = self._env.get_template("report.html")
         rendered = template.render(**context)
 
-        output_path.write_text(rendered, encoding="utf-8")
+        output_path.write_text(rendered, encoding="utf-8", newline="\n")
         logger.info("Report generated: %s", output_path)
         return output_path
 
     @staticmethod
     def _flags_relative_to_onset(session: Session) -> list[dict]:
         """
-        Convert quality flag times to global time relative to recording onset.
-        Quality flags internally store times in per-system ``timestamp``
-        space (which may be an alternate per-system clock such as
-        ``Node_HandLeft_Time``).  To present a single shared timeline in
-        the report:
+        Express quality flag times relative to the global recording onset.
 
-        1. **Global onset** — the earliest ``find_recording_onset`` across
-           all streams' ``timeSinceStartup`` columns (the Unity global
-           clock).  If a stream is missing ``timeSinceStartup``, a warning
-           is logged (no fallback; ``timeSinceStartup`` is the single
-           source of truth for cross-system time).
-
-        2. **Per-flag conversion** — for each flag, ``np.interp`` maps
-           the per-system start/end times to the global
-           ``timeSinceStartup`` axis, then subtracts the global onset.
-           This makes all flag times comparable across systems and
-           starting from 0.
+        Quality flags store times in ``timeSinceStartup`` space (the global
+        Unity clock).  The global onset is the earliest non-zero
+        ``timeSinceStartup`` across all streams.  Each flag's start/end is
+        shifted by subtracting that onset, producing a shared timeline that
+        starts at 0 and is comparable across all tracking systems.
 
         Returns a list of dicts consumed by the Jinja2 HTML template.
         """
@@ -205,13 +201,13 @@ class ReportGenerator:
         for stream in session.streams.values():
             if stream.data.empty:
                 continue
-            if "timeSinceStartup" not in stream.data.columns:
+            if GLOBAL_CLOCK_COLUMN not in stream.data.columns:
                 logger.warning(
                     f"{stream.system.value}: missing timeSinceStartup column, "
                     "cannot compute global onset for this stream"
                 )
                 continue
-            onset = find_recording_onset(stream.data["timeSinceStartup"].values)
+            onset = find_recording_onset(stream.data[GLOBAL_CLOCK_COLUMN].values)
             if onset is not None:
                 onsets.append(onset)
 
@@ -223,25 +219,9 @@ class ReportGenerator:
 
         flags = []
         for flag in session.all_flags:
-            stream = session.streams.get(flag.system)
+            # Flags store timeSinceStartup values directly — subtract global onset.
             start_global = flag.start_time
             end_global = flag.end_time
-
-            # Convert per-system time → global time when timeSinceStartup exists
-            if (
-                stream is not None
-                and "timeSinceStartup" in stream.data.columns
-                and "timestamp" in stream.data.columns
-            ):
-                ts = stream.data["timestamp"].values
-                gs = stream.data["timeSinceStartup"].values
-                # Per-system clocks may not be monotonic; np.interp
-                # requires sorted xp, so sort both arrays together.
-                sort_idx = np.argsort(ts)
-                ts_sorted = ts[sort_idx]
-                gs_sorted = gs[sort_idx]
-                start_global = float(np.interp(flag.start_time, ts_sorted, gs_sorted))
-                end_global = float(np.interp(flag.end_time, ts_sorted, gs_sorted))
 
             flags.append(
                 {
@@ -365,7 +345,7 @@ class ReportGenerator:
         shapes: list[dict] = []
 
         if has_events:
-            event_name_col = "trial_type" if "trial_type" in events_df.columns else "name"
+            event_name_col = "name"
             instant_events: list[tuple[float, str]] = []
             duration_events: list[tuple[float, float, str]] = []
 

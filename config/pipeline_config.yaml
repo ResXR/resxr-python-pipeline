@@ -7,10 +7,15 @@
 # ---------------------------
 # Values for BIDS metadata files
 bids:
-  missing_values: "NaN"
+  missing_values: "n/a"
   dataset_type: "raw"
   license: "CC0"
-  authors: []
+  authors:
+    - "ResXR Contributors"
+  readme_text: |
+    This dataset contains virtual reality tracking data processed by the ResXR toolkit.
+
+    For more information about the ResXR project, please visit https://resxr.org.
   reference_frame:
     description: "Global VR playspace coordinate system. Positive X is right, Y is up (superior), Z is forward (anterior)"
     rotation_rule: "left-hand"
@@ -49,8 +54,8 @@ input:
   # File patterns for auto-discovery
   continuous_data_pattern: "*_ContinuousData*.csv"
   face_data_pattern: "*_FaceExpressionData*.csv"
-  metadata_pattern: "*session_metadata.json"
-  events_data_pattern: "*events*.csv"
+  metadata_pattern: "*SessionMetadata.json"
+  events_data_pattern: "*_Events.csv"
 
 # Output Configuration
 # --------------------
@@ -73,13 +78,17 @@ output:
 # Maps source directories to BIDS subject/session identifiers.
 # If empty, sessions will be auto-discovered and numbered.
 session_mappings:
-  - source_dir: "test_data"
+  - source_dir: "Demo_Data/Binary/2026.06.10_18-22"
     subject_id: "01"
     session_label: "01"
 
-  # - source_dir: "17.9.25_hands_TEST_002"
-  #   subject_id: "02"
-  #   session_label: "01"
+  - source_dir: "Demo_Data/Maze/2026.06.10_18-32"
+    subject_id: "02"
+    session_label: "01"
+
+  - source_dir: "Demo_Data/Museum/2026.06.10_18-42"
+    subject_id: "03"
+    session_label: "01"
 
 # Device Configuration
 # --------------------
@@ -122,6 +131,7 @@ validation:
     - sampling_rate
     - stats_summary
     - eyes_closed
+    - clock_dropout
 
   # Column groups for column-scoped validation checks.
   # Each group defines a named set of columns; checks decide how to use them.

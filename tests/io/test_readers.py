@@ -165,16 +165,16 @@ class TestLoadEventsData:
         df = load_events_data(tmp_events_csv)
         assert isinstance(df, pd.DataFrame)
 
-    def test_renames_name_to_trial_type(self, tmp_events_csv):
-        """'name' column is renamed to 'trial_type' for BIDS compliance."""
+    def test_keeps_name_column(self, tmp_events_csv):
+        """'name' is preserved (no rename to trial_type)."""
         df = load_events_data(tmp_events_csv)
-        assert "trial_type" in df.columns
-        assert "name" not in df.columns
+        assert "name" in df.columns
+        assert "trial_type" not in df.columns
 
     def test_required_columns_present(self, tmp_events_csv):
-        """trial_type, onset, and duration columns are all present."""
+        """name, onset, and duration columns are all present."""
         df = load_events_data(tmp_events_csv)
-        for col in ("trial_type", "onset", "duration"):
+        for col in ("name", "onset", "duration"):
             assert col in df.columns
 
     def test_onset_sorted_ascending(self, tmp_path):
@@ -238,6 +238,25 @@ class TestLoadSession:
         session = load_session(tmp_session_dir, config)
         assert isinstance(session, Session)
 
+    def test_absent_custom_tables_folder_not_logged_as_error(
+        self, tmp_session_dir, tmp_path, caplog
+    ):
+        """
+        Custom tables are optional; a session without the CustomTables folder
+        must not emit an ERROR-level log (it pollutes logs for normal sessions).
+        """
+        import logging
+
+        config = self._input_config(tmp_path)
+        with caplog.at_level(logging.DEBUG, logger="resxr.io.readers"):
+            load_session(tmp_session_dir, config)
+        errors = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.ERROR and "Custom tables folder not found" in r.getMessage()
+        ]
+        assert errors == []
+
     def test_session_id_from_metadata(self, tmp_session_dir, tmp_path):
         """The session_id matches the value in session_metadata.json."""
         config = self._input_config(tmp_path)
@@ -291,6 +310,140 @@ class TestLoadSession:
         config = self._input_config(tmp_path)
         with pytest.raises(MissingDataError, match="continuous"):
             load_session(session_dir, config)
+
+
+# ===========================================================================
+# load_custom_tables_json
+# ===========================================================================
+
+from resxr.io.readers import (  # noqa: E402
+    find_custom_class_csvs,
+    load_custom_class_csv,
+    load_custom_tables_json,
+)
+
+_FIXTURES = Path(__file__).parent / "_fixtures"
+
+
+class TestLoadCustomTablesJson:
+    def test_valid_file_parses_all_fields(self):
+        tables = load_custom_tables_json(_FIXTURES / "sample_custom_tables.json")
+        assert tables is not None
+        assert len(tables) == 1
+        t = tables[0]
+        assert t.class_name == "ChoiceEvent"
+        assert t.row_count == 2
+        rt = t.columns[0]
+        assert rt.name == "reaction_time"
+        assert rt.units == "s"
+        assert rt.minimum == 0.0
+        assert rt.maximum is None
+        assert rt.levels is None
+        choice = t.columns[1]
+        assert choice.levels == {"L": "left", "R": "right"}
+        assert choice.units is None
+
+    def test_absent_file_returns_none(self, tmp_path):
+        assert load_custom_tables_json(tmp_path / "nope.json") is None
+
+    def test_malformed_json_returns_none(self, tmp_path):
+        bad = tmp_path / "CustomTables.json"
+        bad.write_text("{not valid")
+        assert load_custom_tables_json(bad) is None
+
+    def test_missing_required_key_returns_none(self, tmp_path):
+        bad = tmp_path / "CustomTables.json"
+        # Column missing the mandatory "Format" field voids the whole file.
+        bad.write_text(
+            '{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{"x":{"Description":"d"}}}}}'
+        )
+        assert load_custom_tables_json(bad) is None
+
+    def test_missing_customtables_wrapper_returns_none(self, tmp_path):
+        bad = tmp_path / "CustomTables.json"
+        bad.write_text('[{"class_name": "X", "row_count": 1}]')  # old array format
+        assert load_custom_tables_json(bad) is None
+
+
+# ===========================================================================
+# find_custom_class_csvs
+# ===========================================================================
+
+
+class TestFindCustomClassCsvs:
+    def _make(self, d: Path, name: str, rows: int = 2):
+        d.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame({"onset": [0.0, 1.0][:rows], "duration": [0.0, 0.0][:rows]})
+        df.to_csv(d / name, index=False)
+
+    def test_loads_all_csvs_and_strips_prefix(self, tmp_path):
+        custom = tmp_path / "custom_tables"
+        self._make(custom, "2026.03.12_15-47_ChoiceEvent.csv")
+        self._make(custom, "2026.03.12_15-47_TrialsData.csv")
+        result = find_custom_class_csvs(custom, recording_id="2026.03.12_15-47")
+        assert set(result.keys()) == {"ChoiceEvent", "TrialsData"}
+
+    def test_bare_filename_no_prefix(self, tmp_path):
+        custom = tmp_path / "custom_tables"
+        self._make(custom, "ChoiceEvent.csv")
+        result = find_custom_class_csvs(custom, recording_id="anything")
+        assert set(result.keys()) == {"ChoiceEvent"}
+
+    def test_missing_folder_returns_empty(self, tmp_path):
+        assert find_custom_class_csvs(tmp_path / "nope", recording_id="x") == {}
+
+    def test_ignores_non_csv_files(self, tmp_path):
+        custom = tmp_path / "custom_tables"
+        self._make(custom, "ChoiceEvent.csv")
+        (custom / "custom_tables.json").write_text("[]")
+        (custom / "notes.txt").write_text("x")
+        result = find_custom_class_csvs(custom, recording_id="x")
+        assert set(result.keys()) == {"ChoiceEvent"}
+
+
+# ===========================================================================
+# load_custom_class_csv
+# ===========================================================================
+
+
+class TestLoadCustomClassCsv:
+    def test_loads_valid(self, tmp_path):
+        p = tmp_path / "ChoiceEvent.csv"
+        pd.DataFrame({"onset": [0.0], "duration": [1.0], "rt": [0.3]}).to_csv(p, index=False)
+        df = load_custom_class_csv(p)
+        assert list(df["onset"]) == [0.0]
+
+    def test_missing_onset_raises(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        pd.DataFrame({"duration": [1.0]}).to_csv(p, index=False)
+        with pytest.raises(DataLoadError, match="onset"):
+            load_custom_class_csv(p)
+
+    def test_missing_duration_raises(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        pd.DataFrame({"onset": [0.0]}).to_csv(p, index=False)
+        with pytest.raises(DataLoadError, match="duration"):
+            load_custom_class_csv(p)
+
+    def test_non_numeric_onset_raises(self, tmp_path):
+        p = tmp_path / "bad.csv"
+        pd.DataFrame({"onset": ["x"], "duration": [1.0]}).to_csv(p, index=False)
+        with pytest.raises(DataLoadError):
+            load_custom_class_csv(p)
+
+    def test_bool_and_int_columns_preserved_as_text(self, tmp_path):
+        # Non-onset/duration columns keep their exact source token so the events
+        # merge cannot upcast them to float (false/true -> 0.0/1.0, 0 -> 0.0).
+        p = tmp_path / "Maze.csv"
+        p.write_text(
+            "onset,duration,flag,trial,coin\n5.0,1.0,false,0,-0.752\n7.0,1.0,true,1,0.7520003\n"
+        )
+        df = load_custom_class_csv(p)
+        assert df["flag"].tolist() == ["false", "true"]
+        assert df["trial"].tolist() == ["0", "1"]
+        assert df["coin"].tolist() == ["-0.752", "0.7520003"]
+        # onset/duration are still coerced to float for sorting.
+        assert df["onset"].tolist() == [5.0, 7.0]
 
 
 # ===========================================================================
@@ -356,3 +509,90 @@ class TestDiscoverSessions:
         (d / "session_metadata.json").write_text(json.dumps({"session_id": "s1"}))
         sessions = discover_sessions(self._input_config(data_dir))
         assert all(isinstance(p, Path) for p in sessions)
+
+
+# ===========================================================================
+# load_session — custom-table consistency logging (no validation check)
+# ===========================================================================
+
+
+class TestLoadSessionCustomTableLogging:
+    def _config(self, data_dir: Path) -> InputConfig:
+        return InputConfig(
+            data_dir=data_dir,
+            continuous_data_pattern="*_ContinuousData.csv",
+            face_data_pattern="*_FaceExpressionData.csv",
+            metadata_pattern="session_metadata.json",
+            events_data_pattern="*_EventsData.csv",
+        )
+
+    def _session_dir(self, tmp_path: Path, choice_rows: int, tables_json: str) -> Path:
+        d = tmp_path / "sess"
+        d.mkdir()
+        (d / "session_metadata.json").write_text(json.dumps({"session_id": "sess"}))
+        pd.DataFrame({"timeSinceStartup": [1.0, 1.1], "Node_Head_px": [0.1, 0.2]}).to_csv(
+            d / "sess_ContinuousData.csv", index=False
+        )
+        custom = d / "sess_CustomTables"
+        custom.mkdir()
+        pd.DataFrame(
+            {"onset": [0.0, 1.0][:choice_rows], "duration": [0.0, 0.0][:choice_rows]}
+        ).to_csv(custom / "sess_ChoiceEvent.csv", index=False)
+        (custom / "sess_CustomTables.json").write_text(tables_json)
+        return d
+
+    def test_row_count_mismatch_logs_warning(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json='{"CustomTables":{"ChoiceEvent":{"RowCount":5,"Columns":{}}}}',
+        )
+        with caplog.at_level(logging.WARNING):
+            load_session(d, self._config(tmp_path))
+        assert "row_count" in caplog.text
+
+    def test_declared_class_without_csv_logs_warning(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json=(
+                '{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{}},"Ghost":{"RowCount":2,"Columns":{}}}}'
+            ),
+        )
+        with caplog.at_level(logging.WARNING):
+            load_session(d, self._config(tmp_path))
+        assert "Ghost" in caplog.text
+        assert "no matching CSV" in caplog.text
+
+    def test_consistent_schema_no_warning(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json='{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{}}}}',
+        )
+        with caplog.at_level(logging.WARNING):
+            load_session(d, self._config(tmp_path))
+        assert "row_count" not in caplog.text
+        assert "no matching CSV" not in caplog.text
+
+    def test_multiple_custom_tables_json_prefers_exact_and_warns(self, tmp_path, caplog):
+        import logging
+
+        d = self._session_dir(
+            tmp_path,
+            choice_rows=1,
+            tables_json='{"CustomTables":{"ChoiceEvent":{"RowCount":1,"Columns":{}}}}',
+        )
+        # A stray file that sorts alphabetically before "sess_CustomTables.json".
+        # If it were picked, parsing would fail and custom_tables would be None.
+        (d / "sess_CustomTables" / "backup_CustomTables.json").write_text("not valid json")
+        with caplog.at_level(logging.WARNING):
+            session = load_session(d, self._config(tmp_path))
+        assert session.custom_tables is not None  # exact sess_CustomTables.json was used
+        assert "Multiple files matching" in caplog.text

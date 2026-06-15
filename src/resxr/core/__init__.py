@@ -20,6 +20,7 @@ from .constants import (
     BIDS_CHANNEL_PATTERNS,
     BIDS_CHANNEL_TYPE_COUNTS,
     COLUMN_SUFFIXES,
+    GLOBAL_CLOCK_COLUMN,
     SYSTEM_COLUMN_PREFIXES,
     TrackingSystem,
 )
@@ -34,6 +35,8 @@ from .exceptions import (
 )
 from .logger import get_logger, setup_logging
 from .session import (
+    ColumnInfoEntry,
+    CustomTableSchema,
     QualityFlag,
     Session,
     SessionMetadata,
@@ -43,6 +46,7 @@ from .session import (
 __all__ = [
     # Constants
     "TrackingSystem",
+    "GLOBAL_CLOCK_COLUMN",
     "SYSTEM_COLUMN_PREFIXES",
     "BIDS_CHANNEL_PATTERNS",
     "COLUMN_SUFFIXES",
@@ -52,6 +56,8 @@ __all__ = [
     "SessionMetadata",
     "TrackingStream",
     "QualityFlag",
+    "ColumnInfoEntry",
+    "CustomTableSchema",
     # Config
     "PipelineConfig",
     "InputConfig",

@@ -9,9 +9,14 @@ Key utilities:
   array, used as the single source of truth for recording onset across
   the pipeline (``TrackingStream._start_timestamp``,
   ``prepare_motion_data``, and the HTML report).
-- ``find_recording_offset_index``: finds the last non-zero timestamp,
-  used to detect trailing zeros emitted after the device stops
-  producing real timing data.
+- ``find_first_nonzero_index``: returns the positional index of the first
+  finite non-zero timestamp (the lower bound of the recording window).
+- ``find_last_nonzero_index``: returns the positional index of the last
+  finite non-zero timestamp (the upper bound of the recording window).
+- ``find_internal_zero_blocks``: detects contiguous zero/NaN blocks
+  strictly inside the recording window (between onset and offset).
+  Leading/trailing edge zeros are excluded — they are device spin-up/down
+  padding, not mid-recording dropouts.
 """
 
 import logging
@@ -48,7 +53,24 @@ def format_duration(seconds: float) -> str:
         return f"{hours}h {minutes}m {secs:.0f}s"
 
 
-def find_recording_onset_index(timestamps: np.ndarray) -> int | None:
+def version_label(key: str) -> str:
+    """Turn a metadata JSON key into a display label, engine-agnostically.
+
+    Used for the ``software_versions`` map on ``SessionMetadata`` (every
+    scalar ``*version*`` key captured from SessionMetadata.json), so labels
+    work for any engine without per-device code:
+
+    ``unity_version`` -> "Unity", ``horizon_os_version`` -> "Horizon OS",
+    ``software_versions_raw`` -> "Software".
+    """
+    label = key.removesuffix("_raw")
+    for suffix in ("_versions", "_version"):
+        label = label.removesuffix(suffix)
+    acronyms = {"os", "api", "sdk", "xr", "ovr"}
+    return " ".join(w.upper() if w in acronyms else w.capitalize() for w in label.split("_"))
+
+
+def find_first_nonzero_index(timestamps: np.ndarray) -> int | None:
     """
     Return the positional index of the first finite non-zero timestamp.
 
@@ -73,11 +95,11 @@ def find_recording_onset_index(timestamps: np.ndarray) -> int | None:
     return int(idx[0]) if idx.size else None
 
 
-def find_recording_offset_index(timestamps: np.ndarray) -> int | None:
+def find_last_nonzero_index(timestamps: np.ndarray) -> int | None:
     """
     Return the positional index of the last finite non-zero timestamp.
 
-    Symmetric counterpart of ``find_recording_onset_index``.  Detects
+    Symmetric counterpart of ``find_first_nonzero_index``.  Detects
     trailing zeros emitted after the device stops producing real timing
     data.
 
@@ -117,7 +139,7 @@ def find_recording_onset(timestamps: np.ndarray) -> float | None:
     float | None
         First valid timestamp, or None if all zeros / NaN / empty
     """
-    idx = find_recording_onset_index(timestamps)
+    idx = find_first_nonzero_index(timestamps)
     if idx is None:
         return None
     onset = float(timestamps[idx])
@@ -130,9 +152,53 @@ def find_recording_onset(timestamps: np.ndarray) -> float | None:
     return onset
 
 
+def find_internal_zero_blocks(timestamps: np.ndarray) -> list[tuple[int, int]]:
+    """
+    Return positional index ranges for contiguous zero (or NaN) blocks
+    that fall strictly inside the recording window (onset–offset).
+
+    Leading and trailing zeros are excluded; only mid-recording dropouts
+    are returned.
+
+    Parameters
+    ----------
+    timestamps : np.ndarray
+        Array of timestamp values
+
+    Returns
+    -------
+    list[tuple[int, int]]
+        List of (start_idx, end_idx) pairs (inclusive, in original array
+        index space) for each internal zero block. Empty list if none.
+    """
+    onset_idx = find_first_nonzero_index(timestamps)
+    offset_idx = find_last_nonzero_index(timestamps)
+
+    if onset_idx is None or offset_idx is None or onset_idx >= offset_idx:
+        return []
+
+    # Strictly between onset and offset (neither endpoint can be zero by definition)
+    window_start = onset_idx + 1
+    window_end = offset_idx  # offset sample is valid; exclude it (slice is exclusive)
+
+    if window_start >= window_end:
+        return []
+
+    w = timestamps[window_start:window_end]
+    is_bad = ~np.isfinite(w) | (w == 0)
+
+    d = np.diff(is_bad.astype(np.int8), prepend=0, append=0)
+    starts = window_start + np.flatnonzero(d == 1)
+    ends = window_start + np.flatnonzero(d == -1) - 1
+
+    return list(zip(starts.tolist(), ends.tolist(), strict=True))
+
+
 __all__ = [
     "format_duration",
+    "version_label",
     "find_recording_onset",
-    "find_recording_onset_index",
-    "find_recording_offset_index",
+    "find_first_nonzero_index",
+    "find_last_nonzero_index",
+    "find_internal_zero_blocks",
 ]

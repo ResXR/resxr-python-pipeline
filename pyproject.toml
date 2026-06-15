@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "resxr"
-version = "0.1.1"
+version = "0.2.0"
 description = "VR Data Processing Pipeline"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -44,8 +44,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://resxr.org"
-Repository = "https://github.com/ResXR/ResXR"
-"Bug Tracker" = "https://github.com/ResXR/ResXR/issues"
+Repository = "https://github.com/ResXR/resxr-python-pipeline"
+"Bug Tracker" = "https://github.com/ResXR/resxr-python-pipeline/issues"
 
 [project.scripts]
 resxr = "resxr.cli:main"

@@ -1,0 +1,21 @@
+{
+  "CustomTables": {
+    "ChoiceEvent": {
+      "File": "ChoiceEvent.csv",
+      "RowCount": 2,
+      "Columns": {
+        "reaction_time": {
+          "Description": "Reaction time",
+          "Units": "s",
+          "Format": "float",
+          "Minimum": 0.0
+        },
+        "choice": {
+          "Description": "Chosen option",
+          "Format": "str",
+          "Levels": { "L": "left", "R": "right" }
+        }
+      }
+    }
+  }
+}

@@ -10,8 +10,8 @@ dist/
 build/
 *.egg
 
-# Generated BIDS output
-output/
+# Generated BIDS output (tracked for Demo Data upload)
+# output/
 
 # Windows reserved name (avoids "unable to index file 'nul'" on git add)
 nul

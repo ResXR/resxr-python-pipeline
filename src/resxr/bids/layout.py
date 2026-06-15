@@ -83,6 +83,15 @@ class BIDSLayout:
         """Get path to session directory."""
         return self.get_subject_dir(session, derivative) / f"ses-{session.session_label}"
 
+    def sourcedata_session_dir(self, session: Session) -> Path:
+        """Path to the verbatim sourcedata copy for this session."""
+        return (
+            self.bids_root
+            / "sourcedata"
+            / f"sub-{session.subject_id}"
+            / f"ses-{session.session_label}"
+        )
+
     def get_motion_dir(self, session: Session, derivative: bool = False) -> Path:
         """Get path to motion data directory."""
         return self.get_session_dir(session, derivative) / "motion"

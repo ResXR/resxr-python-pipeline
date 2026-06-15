@@ -25,16 +25,16 @@ An open-source toolkit for standardized XR behavioral research. Converts Unity/M
 **For users (minimal install):**
 
 ```bash
-git clone https://github.com/ResXR/ResXR.git
+git clone https://github.com/ResXR/resxr-python-pipeline.git
 cd ResXR
 conda env create -f environment.yml
-conda activate resxr
+conda activate resxr_env
 ```
 
 **For developers (includes dev tools):**
 
 ```bash
-git clone https://github.com/ResXR/ResXR.git
+git clone https://github.com/ResXR/resxr-python-pipeline.git
 cd ResXR
 conda env create -f environment-dev.yml
 conda activate resxr_dev
@@ -45,7 +45,7 @@ The dev environment includes pytest, ruff, and installs the package in editable 
 ### Option 2: Using uv
 
 ```bash
-git clone https://github.com/ResXR/ResXR.git
+git clone https://github.com/ResXR/resxr-python-pipeline.git
 cd ResXR
 uv sync --all-extras
 ```
@@ -73,10 +73,10 @@ Edit `config/pipeline_config.yaml`:
 # Input/Output paths
 input:
   data_dir: /path/to/your/session/data
-  continuous_data_pattern: "*_ContinuousData.csv"
-  face_data_pattern: "*_FaceExpressionData.csv"
-  metadata_pattern: "*session_metadata.json"
-  events_data_pattern: "*events*.csv"  # Optional: task/stimulus events
+  continuous_data_pattern: "*_ContinuousData*.csv"
+  face_data_pattern: "*_FaceExpressionData*.csv"
+  metadata_pattern: "*SessionMetadata.json"
+  events_data_pattern: "*_Events.csv"  # Optional: task/stimulus events
 
 output:
   bids_root: /path/to/output
@@ -151,11 +151,30 @@ ResXR expects data recorded from Unity/Meta Quest with the following structure:
 
 ```
 session_folder/
-├── *_ContinuousData.csv     # Main tracking data (head, hands, eyes, etc.)
-├── *_FaceExpressionData.csv # Face tracking (FACS blendshapes) - optional
-├── *events*.csv             # Task/stimulus event markers - optional
-└── *session_metadata.json   # Recording configuration & timestamps
+├── *_ContinuousData.csv      # Main tracking data (head, hands, eyes, etc.)
+├── *_FaceExpressionData.csv  # Face tracking (FACS blendshapes) - optional
+├── *_Events.csv              # Task/stimulus event markers - optional
+├── *_SessionMetadata.json    # Recording configuration & timestamps
+└── *_CustomTables/           # Experiment-defined custom data classes - optional
+    ├── *_CustomTables.json   # Schema describing each custom table's columns
+    └── *_<ClassName>.csv     # One CSV per custom data class
 ```
+
+### Software version metadata (engine-agnostic)
+
+Every scalar `*version*` key found in `*_SessionMetadata.json` (e.g.
+`unity_version`, `horizon_os_version`, `software_versions_raw`) is captured
+automatically, whatever the engine or headset. The captured versions are:
+
+- listed in the HTML report header under **Software versions**, and
+- folded into the BIDS `SoftwareVersions` sidecar field.
+
+Known vendor keys (Unity, OVR Plugin, Horizon OS) get curated labels via the
+`_KNOWN_VERSION_FORMATS` table in `src/resxr/bids/metadata.py`; any other
+recorder's keys (e.g. an Unreal session's `unreal_engine_version`) flow
+through with auto-generated labels. Supporting a new headset therefore needs
+no code changes — add a table row only for a prettier label or to filter
+sentinel values.
 
 ### Expected CSV columns
 
@@ -232,10 +251,11 @@ All BIDS metadata values are configurable:
 
 ```yaml
 bids:
-  missing_values: "NaN"      # How NaN values are written
+  missing_values: "n/a"      # BIDS missing-value token written to TSV cells
   dataset_type: "raw"        # BIDS dataset type
   license: "CC0"             # Dataset license
   authors: []                # List of authors
+  readme_text: ""            # Optional free-text content for the dataset README
   reference_frame:           # Coordinate system
     description: "Global VR playspace coordinate system..."
     rotation_rule: "left-hand"
@@ -301,6 +321,7 @@ system_descriptions:
 device:
   manufacturer: "Meta"
   model_name: "Meta Quest"
+  # task_description: "Free-viewing VR session"   # Optional; added to BIDS sidecars
 ```
 
 ### Tracking Systems
@@ -321,15 +342,12 @@ systems:
 
 ```yaml
 validation:
-  sampling_rate_tolerance: 0.10       # Max deviation from expected rate (10%)
-  sampling_cv_threshold: 0.5          # Max coefficient of variation (50%)
-  eyes_closed_threshold: 0.9          # Blend shape value to consider eye closed (0-1)
-  eyes_closed_min_duration: 0.1       # Min duration (seconds) to flag as closed
   enabled_checks:
     - hands_tracking_loss
     - sampling_rate
     - eyes_closed
     - stats_summary
+    - clock_dropout                     # Detects clock/timestamp dropouts
   # Column groups for column-scoped checks
   column_groups:
     - name: "Left Hand"
@@ -344,11 +362,18 @@ validation:
         - Right_XRHand_Wrist_x
         - Right_XRHand_Wrist_y
         - Right_XRHand_Wrist_z
-  # Optional: assign which checks receive which groups (by group name)
-  check_column_groups:
-    hands_tracking_loss:
-      - "Left Hand"
-      - "Right Hand"
+  # Tunable thresholds and check->group assignments live under `settings:`
+  # (keys placed directly under `validation:` are silently ignored).
+  settings:
+    sampling_rate_tolerance: 0.10       # Max deviation from expected rate (10%)
+    sampling_cv_threshold: 0.5          # Max coefficient of variation (50%)
+    eyes_closed_threshold: 0.9          # Blend shape value to consider eye closed (0-1)
+    eyes_closed_min_duration: 0.1       # Min duration (seconds) to flag as closed
+    # Optional: assign which checks receive which groups (by group name)
+    check_column_groups:
+      hands_tracking_loss:
+        - "Left Hand"
+        - "Right Hand"
 ```
 
 **Column groups** are defined by `name`, `description`, and `columns`. Each entry must have a `name` and `columns` key (validated at config load time). `check_column_groups` optionally assigns which checks receive which groups (by group name). If `column_groups` is omitted, checks fall back to a single default group containing all columns in the stream.
@@ -402,7 +427,8 @@ from resxr.core.config import PipelineConfig
 config = PipelineConfig.from_yaml("config/pipeline_config.yaml")
 session = load_session("/path/to/session_dir", config.input)
 print(f"Session: {session.session_id}")
-print(f"Duration: {session.total_duration_seconds:.1f}s")
+# Note: load_session() loads raw data only. total_duration_seconds is 0.0
+# until the pipeline splits streams; use run(...) for the full pipeline.
 ```
 
 ---
@@ -516,6 +542,12 @@ See the project [README](README.md) and source docstrings for details.
 
 ---
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the release history and notable changes.
+
+---
+
 ## License
 
 Apache License 2.0 - see LICENSE file for details.
@@ -540,7 +572,7 @@ If you use ResXR in your research, please cite:
 @software{resxr,
   title = {ResXR: XR Experiment Data Processing Pipeline},
   year = {2026},
-  url = {https://github.com/ResXR/ResXR}
+  url = {https://github.com/ResXR/resxr-python-pipeline}
 }
 ```
 

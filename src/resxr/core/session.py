@@ -13,8 +13,8 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from ..utils import find_recording_offset_index, find_recording_onset, find_recording_onset_index
-from .constants import TrackingSystem
+from ..utils import find_first_nonzero_index, find_last_nonzero_index, find_recording_onset
+from .constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -113,8 +113,8 @@ class QualityFlag:
 
         # Restrict the mask to the valid recording window (onset → offset)
         # so that leading/trailing zero rows never produce flags.
-        onset_idx = find_recording_onset_index(timestamps)
-        offset_idx = find_recording_offset_index(timestamps)
+        onset_idx = find_first_nonzero_index(timestamps)
+        offset_idx = find_last_nonzero_index(timestamps)
         if onset_idx is None or offset_idx is None:
             return []
         if onset_idx > 0 or offset_idx < len(boolean_mask) - 1:
@@ -188,6 +188,32 @@ class QualityFlag:
 
 
 @dataclass
+class ColumnInfoEntry:
+    """One column's BIDS description, parsed from the CustomTables sidecar.
+
+    `description` and `format` are always present. The rest are optional and
+    only populated when the source JSON includes them.
+    """
+
+    name: str
+    description: str
+    format: str  # BIDS "Format" field - always present
+    units: str | None = None  # numeric columns only
+    levels: dict[str, str] | None = None  # categorical columns only
+    minimum: float | None = None
+    maximum: float | None = None
+
+
+@dataclass
+class CustomTableSchema:
+    """Schema for one custom data class, parsed from the CustomTables sidecar."""
+
+    class_name: str
+    row_count: int
+    columns: list[ColumnInfoEntry]
+
+
+@dataclass
 class SessionMetadata:
     """
     Parsed session metadata from session_metadata.json.
@@ -198,10 +224,8 @@ class SessionMetadata:
     session_id: str
     utc_start: datetime | None = None
     device_utc_offset: str = ""
-    unity_version: str = ""
     platform: str = ""
     build_id: str = ""
-    ovrplugin_version: str = ""
     sampling_mode: str = ""
     fixed_delta_time: float = 0.02
     schema_rev: str = ""
@@ -213,9 +237,21 @@ class SessionMetadata:
     eyes_enabled: bool = False
     controllers_enabled: bool = False
 
-    # Additional metadata
-    detected_hand_bones: int = 0
-    detected_body_joints: int = 0
+    # Number of columns allocated in the CSV schema at session start (a
+    # compile-time constant, not a live device measurement). Kept for
+    # provenance; surfaced only in sourcedata, not in BIDS sidecars.
+    schema_hand_bones: int = 0
+    schema_body_joints: int = 0
+    schema_face_expressions: int = 0
+
+    # Raw device serial. Folded into BIDS DeviceSerialNumber.
+    device_serial_number: str = ""
+
+    # Engine-agnostic map of every scalar "*version*" key found in
+    # SessionMetadata.json (original key -> value): engine, runtime, and OS
+    # version strings (Unity, Unreal, ...) all flow through to the report
+    # and BIDS SoftwareVersions automatically.
+    software_versions: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -248,7 +284,7 @@ class TrackingStream:
                 f"sampling_frequency must be set for {self.system.value} stream (from config)"
             )
         if not self.data.empty:
-            time_cols = {"timestamp", "timeSinceStartup"}
+            time_cols = {"timestamp", GLOBAL_CLOCK_COLUMN}
             self.channel_count = len([c for c in self.data.columns if c not in time_cols])
             self._compute_effective_rate()
 
@@ -344,6 +380,12 @@ class Session:
     raw_continuous_data: pd.DataFrame | None = None
     raw_face_data: pd.DataFrame | None = None
     raw_events_data: pd.DataFrame | None = None
+
+    # Custom data classes (parsed from CustomTables sidecar + their CSVs)
+    custom_tables: list[CustomTableSchema] | None = None
+    custom_tables_data: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Filled by merge_events just before BIDS events are written
+    merged_events_data: pd.DataFrame | None = None
 
     # Source paths for reference
     source_dir: str | None = None

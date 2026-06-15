@@ -14,9 +14,13 @@ from .column_maps import (
     infer_bids_channel_info,
 )
 from .readers import (
+    SessionFiles,
     discover_sessions,
+    find_custom_class_csvs,
     find_session_files,
     load_continuous_data,
+    load_custom_class_csv,
+    load_custom_tables_json,
     load_face_data,
     load_session,
     load_session_metadata,
@@ -26,6 +30,7 @@ from .splitter import (
     split_continuous_data,
 )
 from .writers import (
+    copy_sourcedata,
     write_bids_events,
     write_bids_tsv,
     write_channels_tsv,
@@ -43,6 +48,10 @@ __all__ = [
     "load_session",
     "discover_sessions",
     "find_session_files",
+    "find_custom_class_csvs",
+    "load_custom_class_csv",
+    "load_custom_tables_json",
+    "SessionFiles",
     # Column maps
     "get_columns_for_system",
     "classify_columns_by_system",
@@ -54,6 +63,7 @@ __all__ = [
     "split_continuous_data",
     "is_system_enabled",
     # Writers
+    "copy_sourcedata",
     "write_bids_tsv",
     "write_bids_events",
     "write_json",

@@ -21,7 +21,7 @@ which runs at write time.
 
 from __future__ import annotations
 
-from ..core.constants import TrackingSystem
+from ..core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ..core.exceptions import ConfigurationError
 from ..core.logger import get_logger
 from ..core.session import Session, SessionMetadata, TrackingStream
@@ -128,12 +128,12 @@ def split_continuous_data(
             alt_time_col = cols[0]
             if alt_time_col in system_df.columns:
                 if "timestamp" in system_df.columns:
-                    system_df = system_df.rename(columns={"timestamp": "timeSinceStartup"})
+                    system_df = system_df.rename(columns={"timestamp": GLOBAL_CLOCK_COLUMN})
                 system_df = system_df.rename(columns={alt_time_col: "timestamp"})
                 logger.debug(f"Using {alt_time_col} as timestamp for {system.value}")
 
         # Determine data (non-time) columns
-        data_cols = [c for c in system_df.columns if c not in ("timestamp", "timeSinceStartup")]
+        data_cols = [c for c in system_df.columns if c not in ("timestamp", GLOBAL_CLOCK_COLUMN)]
 
         # Get sampling frequency from config
         if system.value not in sampling_frequencies:
@@ -167,11 +167,11 @@ def split_continuous_data(
                 alt_time_col = alternate_time_columns.get("Face")
                 if alt_time_col and alt_time_col in face_df.columns:
                     if "timestamp" in face_df.columns:
-                        face_df = face_df.rename(columns={"timestamp": "timeSinceStartup"})
+                        face_df = face_df.rename(columns={"timestamp": GLOBAL_CLOCK_COLUMN})
                     face_df = face_df.rename(columns={alt_time_col: "timestamp"})
                     logger.debug(f"Using {alt_time_col} as timestamp for Face")
 
-            data_cols = [c for c in face_df.columns if c not in ("timestamp", "timeSinceStartup")]
+            data_cols = [c for c in face_df.columns if c not in ("timestamp", GLOBAL_CLOCK_COLUMN)]
 
             # Get sampling frequency from config
             if "Face" not in sampling_frequencies:

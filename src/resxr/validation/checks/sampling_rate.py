@@ -9,9 +9,13 @@ from __future__ import annotations
 import numpy as np
 
 from ...core.config import ValidationConfig
+from ...core.constants import GLOBAL_CLOCK_COLUMN
+from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
-from ...utils import find_recording_offset_index, find_recording_onset_index
+from ...utils import find_first_nonzero_index, find_last_nonzero_index
 from ..registry import register_check
+
+logger = get_logger(__name__)
 
 
 class SamplingRateCheck:
@@ -36,15 +40,23 @@ class SamplingRateCheck:
         if len(df) < 2 or "timestamp" not in df.columns:
             return flags
 
-        timestamps = df["timestamp"].values
         actual_rate = stream.sampling_frequency_effective
         expected_rate = stream.sampling_frequency
 
         if actual_rate <= 0:
             return flags
 
-        onset_idx = find_recording_onset_index(timestamps)
-        offset_idx = find_recording_offset_index(timestamps)
+        if GLOBAL_CLOCK_COLUMN not in df.columns:
+            logger.error(
+                f"{stream.system.value}: timeSinceStartup column missing — "
+                "cannot create sampling_rate flags. "
+                "Check alternate_time_columns in pipeline_config.yaml."
+            )
+            return flags
+        timestamps = df[GLOBAL_CLOCK_COLUMN].values
+
+        onset_idx = find_first_nonzero_index(timestamps)
+        offset_idx = find_last_nonzero_index(timestamps)
         if onset_idx is None or offset_idx is None or onset_idx > offset_idx:
             return flags
 

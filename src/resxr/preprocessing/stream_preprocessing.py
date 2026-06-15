@@ -14,7 +14,7 @@ Provides two independent preprocessing stages:
    and strips the originals from the output DataFrame:
 
    - ``timestamp`` → ``latency``: per-system seconds from recording onset
-     (first non-zero timestamp via ``find_recording_onset_index``).
+     (first non-zero timestamp via ``find_first_nonzero_index``).
    - ``timeSinceStartup`` → ``latency_global``: global Unity clock seconds
      from recording onset.  Only present when the stream uses an alternate
      per-system time column (configured in ``alternate_time_columns``).
@@ -29,7 +29,7 @@ Provides two independent preprocessing stages:
 Pipeline data flow::
 
     splitter (split only)
-        → validate (quality flags use per-system ``timestamp``)
+        → validate (quality flags use ``timeSinceStartup`` for boundaries)
         → preprocess_stream (optional masking for derivative)
         → prepare_motion_data (LATENCY channels + strip internal cols)
         → write BIDS (motion.tsv, channels.tsv, motion.json)
@@ -40,9 +40,10 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..core.constants import GLOBAL_CLOCK_COLUMN
 from ..core.logger import get_logger
 from ..core.session import TrackingStream
-from ..utils import find_recording_offset_index, find_recording_onset_index
+from ..utils import find_first_nonzero_index, find_last_nonzero_index
 
 logger = get_logger(__name__)
 
@@ -100,12 +101,21 @@ def apply_quality_masking(
         return data
 
     # Get data columns (exclude time columns - NEVER mask timestamps)
-    time_cols = {"timestamp", "timeSinceStartup"}
+    time_cols = {"timestamp", GLOBAL_CLOCK_COLUMN}
     data_cols = [c for c in data.columns if c not in time_cols]
 
+    # Quality flags store timeSinceStartup values; compare against the same clock.
+    if GLOBAL_CLOCK_COLUMN not in data.columns:
+        logger.error(
+            f"{stream.system.value}: timeSinceStartup column missing — "
+            "cannot apply quality masking. "
+            "Check alternate_time_columns in pipeline_config.yaml."
+        )
+        return data
+
     # Optimize: Use NumPy arrays for vectorized operations
-    timestamps = data["timestamp"].values
-    data_start, data_end = timestamps.min(), timestamps.max()
+    ts_for_mask = data[GLOBAL_CLOCK_COLUMN].values
+    data_start, data_end = ts_for_mask.min(), ts_for_mask.max()
 
     # Build column → mask mapping
     column_masks = {}
@@ -116,7 +126,7 @@ def apply_quality_masking(
             continue
 
         # Vectorized time mask
-        time_mask = (timestamps >= flag.start_time) & (timestamps <= flag.end_time)
+        time_mask = (ts_for_mask >= flag.start_time) & (ts_for_mask <= flag.end_time)
 
         # Determine which columns to mask
         if not flag.target_columns:
@@ -190,7 +200,7 @@ def preprocess_stream(
     stream.clean_data = result
 
 
-_INTERNAL_TIME_COLS = {"timestamp", "timeSinceStartup"}
+_INTERNAL_TIME_COLS = {"timestamp", GLOBAL_CLOCK_COLUMN}
 
 
 def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
@@ -212,7 +222,7 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
       stream uses an alternate time column and the original global
       ``timestamp`` was preserved as ``timeSinceStartup`` by the splitter).
 
-    Recording onset is determined by ``find_recording_onset_index``
+    Recording onset is determined by ``find_first_nonzero_index``
     (first finite non-zero value).  Rows before onset are set to
     ``np.nan`` since no valid timing exists yet.
 
@@ -233,8 +243,8 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
 
     if "timestamp" in out.columns and len(out) > 0:
         ts_vals = out["timestamp"].values
-        onset_idx = find_recording_onset_index(ts_vals)
-        offset_idx = find_recording_offset_index(ts_vals)
+        onset_idx = find_first_nonzero_index(ts_vals)
+        offset_idx = find_last_nonzero_index(ts_vals)
         onset = float(ts_vals[onset_idx]) if onset_idx is not None else 0.0
 
         latency = out["timestamp"] - onset
@@ -246,13 +256,13 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
         out.insert(0, "latency", latency)
         logger.debug(f"Added latency channel (onset: {onset:.3f}s)")
 
-    if "timeSinceStartup" in out.columns and len(out) > 0:
-        tsu_vals = out["timeSinceStartup"].values
-        global_onset_idx = find_recording_onset_index(tsu_vals)
-        global_offset_idx = find_recording_offset_index(tsu_vals)
+    if GLOBAL_CLOCK_COLUMN in out.columns and len(out) > 0:
+        tsu_vals = out[GLOBAL_CLOCK_COLUMN].values
+        global_onset_idx = find_first_nonzero_index(tsu_vals)
+        global_offset_idx = find_last_nonzero_index(tsu_vals)
         global_onset = float(tsu_vals[global_onset_idx]) if global_onset_idx is not None else 0.0
 
-        latency_global = out["timeSinceStartup"] - global_onset
+        latency_global = out[GLOBAL_CLOCK_COLUMN] - global_onset
         if global_onset_idx is not None and global_onset_idx > 0:
             latency_global.iloc[:global_onset_idx] = np.nan
         if global_offset_idx is not None and global_offset_idx < len(latency_global) - 1:

@@ -125,3 +125,11 @@ class TestCreateStructure:
         deriv_motion = layout.get_motion_dir(minimal_session, derivative=True)
         assert deriv_motion.is_dir()
         assert "derivatives" in str(deriv_motion)
+
+
+def test_sourcedata_session_dir(minimal_session, tmp_path):
+    from resxr.bids.layout import BIDSLayout
+
+    layout = BIDSLayout(tmp_path, "vr")
+    p = layout.sourcedata_session_dir(minimal_session)
+    assert p == tmp_path / "sourcedata" / "sub-01" / "ses-01"
