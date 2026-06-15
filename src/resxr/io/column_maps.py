@@ -19,10 +19,10 @@ LATENCY channel recognition:
 from __future__ import annotations
 
 from ..core.constants import (
-    GLOBAL_CLOCK_COLUMN,
     BIDS_CHANNEL_PATTERNS,
     BIDS_CHANNEL_TYPE_COUNTS,
     COLUMN_SUFFIXES,
+    GLOBAL_CLOCK_COLUMN,
     SYSTEM_COLUMN_PREFIXES,
     TrackingSystem,
 )

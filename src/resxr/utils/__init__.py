@@ -67,9 +67,7 @@ def version_label(key: str) -> str:
     for suffix in ("_versions", "_version"):
         label = label.removesuffix(suffix)
     acronyms = {"os", "api", "sdk", "xr", "ovr"}
-    return " ".join(
-        w.upper() if w in acronyms else w.capitalize() for w in label.split("_")
-    )
+    return " ".join(w.upper() if w in acronyms else w.capitalize() for w in label.split("_"))
 
 
 def find_first_nonzero_index(timestamps: np.ndarray) -> int | None:

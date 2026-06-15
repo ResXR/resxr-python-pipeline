@@ -208,9 +208,7 @@ class TestGenerateMotionJson:
         assert "Horizon OS 2.4" in result["SoftwareVersions"]
 
     @pytest.mark.parametrize("sentinel", ["editor", "n/a", "unknown"])
-    def test_software_versions_skips_horizon_sentinels(
-        self, sentinel, head_stream, full_session
-    ):
+    def test_software_versions_skips_horizon_sentinels(self, sentinel, head_stream, full_session):
         """Editor / PCVR / read-failure sentinels are not folded into SoftwareVersions."""
         full_session.metadata.software_versions["horizon_os_version"] = sentinel
         result = generate_motion_json(

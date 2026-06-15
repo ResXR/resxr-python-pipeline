@@ -6,6 +6,7 @@ Converts Unity/Meta Quest tracking data to BIDS-compliant format.
 """
 
 from importlib.metadata import version
+
 __version__ = version("resxr")
 
 from .core import (

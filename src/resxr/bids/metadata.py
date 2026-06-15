@@ -204,7 +204,7 @@ def generate_dataset_description(
     }
     if bids_config.authors:
         desc["Authors"] = bids_config.authors
-        
+
     return desc
 
 
