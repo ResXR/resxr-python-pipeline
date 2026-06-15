@@ -41,6 +41,40 @@ def _events_df() -> pd.DataFrame:
 
 
 # ===========================================================================
+# Line endings (cross-platform reproducibility)
+# ===========================================================================
+
+
+class TestLineEndingsAreLF:
+    """
+    All BIDS text outputs must use LF line endings on every OS so the dataset is
+    byte-reproducible across Windows and Linux.
+
+    Note: on Linux this passes even without the explicit ``lineterminator`` /
+    ``newline`` arguments (text mode already emits LF); the value of this test is
+    as a cross-platform regression guard, since ``pandas.to_csv`` otherwise
+    defaults to ``os.linesep`` (CRLF on Windows).
+    """
+
+    def test_motion_tsv_is_lf(self, tmp_path):
+        path = tmp_path / "x_motion.tsv"
+        write_motion_tsv(_sample_df(), path, missing_values="n/a")
+        data = path.read_bytes()
+        assert b"\r\n" not in data
+        assert b"\n" in data
+
+    def test_channels_tsv_is_lf(self, tmp_path):
+        path = tmp_path / "x_channels.tsv"
+        write_channels_tsv(_sample_df(), path)
+        assert b"\r\n" not in path.read_bytes()
+
+    def test_json_is_lf(self, tmp_path):
+        path = tmp_path / "x.json"
+        write_json({"a": 1, "b": {"c": 2}}, path)
+        assert b"\r\n" not in path.read_bytes()
+
+
+# ===========================================================================
 # write_bids_tsv
 # ===========================================================================
 

@@ -1,2 +1,7 @@
+# Normalize text files to LF on checkout/commit on every OS. The LFS rules
+# below are more specific and keep DATA/ and output/ binary (-text), so this
+# does not touch the LFS-tracked datasets — those are kept LF by the writers.
+* text=auto eol=lf
+
 DATA/** filter=lfs diff=lfs merge=lfs -text
 output/** filter=lfs diff=lfs merge=lfs -text

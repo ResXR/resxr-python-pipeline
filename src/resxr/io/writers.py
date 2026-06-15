@@ -60,6 +60,7 @@ def write_bids_tsv(
             header=include_header,
             float_format=float_format,
             na_rep=missing_values,
+            lineterminator="\n",  # OS-independent line endings (pandas defaults to os.linesep)
         )
         logger.debug(f"Wrote TSV: {path}")
 
@@ -90,7 +91,7 @@ def write_json(data: dict[str, Any], path: Path, indent: int = 2) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(path, "w", encoding="utf-8") as f:
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(data, f, indent=indent, ensure_ascii=False)
             f.write("\n")  # Trailing newline
         logger.debug(f"Wrote JSON: {path}")
@@ -197,14 +198,14 @@ def write_bids_events(
 
     try:
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        events_df.to_csv(output_path, sep="\t", index=False, na_rep="n/a")
+        events_df.to_csv(output_path, sep="\t", index=False, na_rep="n/a", lineterminator="\n")
         logger.debug(f"Wrote events.tsv: {output_path}")
     except Exception as e:
         raise BIDSWriteError(f"Failed to write events TSV {output_path}: {e}") from e
 
     json_path = output_path.with_suffix(".json")
     try:
-        with open(json_path, "w", encoding="utf-8") as f:
+        with open(json_path, "w", encoding="utf-8", newline="\n") as f:
             json.dump(sidecar, f, indent=2, ensure_ascii=False)
             f.write("\n")
         logger.debug(f"Wrote events.json: {json_path}")
