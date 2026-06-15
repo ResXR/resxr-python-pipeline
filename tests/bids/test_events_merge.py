@@ -171,3 +171,30 @@ class TestGenerateEventsSidecar:
         assert "reaction_time" not in sidecar
         assert "choice" not in sidecar
         assert "name" in sidecar
+
+    def test_na_token_excluded_from_name_levels(self):
+        """The BIDS missing-value token 'n/a' must not appear as a name Level."""
+        merged = pd.DataFrame(
+            {
+                "onset": [0.0, 1.0],
+                "duration": [0.0, 0.0],
+                "name": ["real_event", "n/a"],
+            }
+        )
+        sidecar = generate_events_sidecar(merged, None)
+        assert "n/a" not in sidecar["name"]["Levels"]
+        assert "real_event" in sidecar["name"]["Levels"]
+
+    def test_nan_name_excluded_from_levels(self):
+        """A NaN name must not leak into the name Levels as 'nan' or 'n/a'."""
+        merged = pd.DataFrame(
+            {
+                "onset": [0.0, 1.0],
+                "duration": [0.0, 0.0],
+                "name": ["real_event", float("nan")],
+            }
+        )
+        sidecar = generate_events_sidecar(merged, None)
+        assert "nan" not in sidecar["name"]["Levels"]
+        assert "n/a" not in sidecar["name"]["Levels"]
+        assert "real_event" in sidecar["name"]["Levels"]

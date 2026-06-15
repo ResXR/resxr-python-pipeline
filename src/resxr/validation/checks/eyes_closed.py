@@ -27,8 +27,10 @@ class EyesClosedCheck:
 
     name = "eyes_closed"
     description = "Detects periods where both eyes are closed (FACE stream)"
-    # Require both FACE and EYES for multistream access
-    required_streams = [TrackingSystem.FACE, TrackingSystem.EYES]
+    # Detection is FACE-based; the optional propagation to EYES is null-guarded
+    # below, so only FACE is required. Listing EYES here would make the registry
+    # skip the entire check on sessions without eye tracking.
+    required_streams = [TrackingSystem.FACE]
 
     def __call__(
         self,

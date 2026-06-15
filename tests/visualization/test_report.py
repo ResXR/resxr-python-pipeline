@@ -137,6 +137,60 @@ class TestReportGenerator:
         # The flag info should appear somewhere in the report
         assert "test_check" in content
 
+    @staticmethod
+    def _stream_with_flag() -> TrackingStream:
+        """A head stream carrying one quality flag (so the timeline renders)."""
+        stream = _head_stream()
+        ts = stream.data["timestamp"].values
+        stream.quality_flags = [
+            QualityFlag(
+                check_name="test_check",
+                system=TrackingSystem.HEAD,
+                start_time=float(ts[10]),
+                end_time=float(ts[20]),
+                severity="warning",
+                message="flag so timeline renders",
+                mask=False,
+            )
+        ]
+        return stream
+
+    def test_timeline_uses_merged_events_including_custom_tables(self, generator):
+        """
+        The report timeline must reflect the merged events timeline (native +
+        custom-table events), matching the BIDS events.tsv — not only the native
+        events. Regression for the report using raw_events_data.
+        """
+        stream = self._stream_with_flag()
+        session = _minimal_session(streams={TrackingSystem.HEAD: stream})
+        # Native-only events (what the report previously plotted).
+        session.raw_events_data = pd.DataFrame(
+            {"onset": [0.1], "duration": [0.0], "name": ["native_evt"]}
+        )
+        # Merged timeline additionally carries a custom-table event.
+        session.merged_events_data = pd.DataFrame(
+            {
+                "onset": [0.1, 0.2],
+                "duration": [0.0, 0.0],
+                "name": ["native_evt", "CustomChoiceEvent"],
+            }
+        )
+        result = generator.generate(session)
+        content = result.read_text(encoding="utf-8")
+        assert "CustomChoiceEvent" in content
+
+    def test_timeline_falls_back_to_raw_events_when_no_merged(self, generator):
+        """When merged_events_data is absent, the report still shows native events."""
+        stream = self._stream_with_flag()
+        session = _minimal_session(streams={TrackingSystem.HEAD: stream})
+        session.raw_events_data = pd.DataFrame(
+            {"onset": [0.1], "duration": [0.0], "name": ["native_only_evt"]}
+        )
+        session.merged_events_data = None
+        result = generator.generate(session)
+        content = result.read_text(encoding="utf-8")
+        assert "native_only_evt" in content
+
     def test_generate_with_no_output_dir_uses_cwd(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         config = ReportConfig(enabled=True, output_dir=None)

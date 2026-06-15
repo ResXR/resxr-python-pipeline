@@ -146,7 +146,9 @@ def generate_events_sidecar(
         "name": {
             "Description": "Event type or custom data-class name",
             "LongName": "Event Type",
-            "Levels": {str(v): str(v) for v in merged_df["name"].unique()},
+            "Levels": {
+                str(v): str(v) for v in merged_df["name"].unique() if pd.notna(v) and str(v) != NA
+            },
         },
     }
 

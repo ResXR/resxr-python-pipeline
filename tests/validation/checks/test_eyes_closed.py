@@ -10,6 +10,7 @@ from resxr.core.config import ValidationConfig
 from resxr.core.constants import TrackingSystem
 from resxr.core.session import Session, SessionMetadata, TrackingStream
 from resxr.validation.checks.eyes_closed import EyesClosedCheck
+from resxr.validation.registry import CheckRegistry
 from tests.conftest import make_timestamps
 
 # ---------------------------------------------------------------------------
@@ -112,10 +113,15 @@ class TestEyesClosedMetadata:
         assert isinstance(check.description, str)
         assert len(check.description) > 0
 
-    def test_required_streams_includes_face_and_eyes(self):
+    def test_required_streams_is_face_only(self):
+        """
+        Only FACE is required: detection is face-based and EYES propagation is
+        optional/null-guarded. Requiring EYES would make the registry skip the
+        whole check on sessions without eye tracking.
+        """
         check = EyesClosedCheck()
-        assert TrackingSystem.FACE in check.required_streams
-        assert TrackingSystem.EYES in check.required_streams
+        assert check.required_streams == [TrackingSystem.FACE]
+        assert TrackingSystem.EYES not in check.required_streams
 
     def test_required_streams_first_is_face(self):
         """run_all triggers the check when stream==required_streams[0]==FACE."""
@@ -305,6 +311,27 @@ class TestEyesClosedThreshold:
         )
         flags = check(face, session, config)
         assert flags == []
+
+
+class TestEyesClosedRegistryGate:
+    """The registry must not skip eyes_closed when only FACE (no EYES) is present."""
+
+    def test_runs_via_registry_when_eyes_stream_absent(self, session_metadata):
+        """
+        eyes_closed detection is FACE-based; a session with face tracking but no
+        eye tracking must still produce eyes-closed flags when run through the
+        registry (regression for the required_streams=[FACE, EYES] gate).
+        """
+        n = 100
+        left = right = np.full(n, 0.95)
+        face = _make_face_stream(n=n, left_values=left, right_values=right)
+        session = _make_session_face_only(face, session_metadata)
+        registry = CheckRegistry()
+        registry.register(EyesClosedCheck())
+        config = _make_config(eyes_closed_use_min_duration=False)
+        flags = registry.run_all(face, session, config)
+        face_flags = [f for f in flags if f.system == TrackingSystem.FACE]
+        assert len(face_flags) >= 1
 
 
 class TestEyesClosedMinDuration:

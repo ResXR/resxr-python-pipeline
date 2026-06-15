@@ -162,11 +162,15 @@ class ReportGenerator:
             "streams": self._stream_stats(session),
             # Quality flags (times relative to global recording onset)
             "flags": (flags_rel := self._flags_relative_to_onset(session)),
-            # Timeline plot
+            # Timeline plot. Prefer the merged events timeline (native +
+            # custom-table events, matching events.tsv); fall back to native
+            # events when no merge was performed.
             "timeline_html": self._build_timeline(
                 flags_rel,
                 session.total_duration_seconds,
-                session.raw_events_data,
+                session.merged_events_data
+                if session.merged_events_data is not None and not session.merged_events_data.empty
+                else session.raw_events_data,
             ),
             # Footer
             "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
@@ -175,7 +179,7 @@ class ReportGenerator:
         template = self._env.get_template("report.html")
         rendered = template.render(**context)
 
-        output_path.write_text(rendered, encoding="utf-8")
+        output_path.write_text(rendered, encoding="utf-8", newline="\n")
         logger.info("Report generated: %s", output_path)
         return output_path
 

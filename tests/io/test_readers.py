@@ -238,6 +238,25 @@ class TestLoadSession:
         session = load_session(tmp_session_dir, config)
         assert isinstance(session, Session)
 
+    def test_absent_custom_tables_folder_not_logged_as_error(
+        self, tmp_session_dir, tmp_path, caplog
+    ):
+        """
+        Custom tables are optional; a session without the CustomTables folder
+        must not emit an ERROR-level log (it pollutes logs for normal sessions).
+        """
+        import logging
+
+        config = self._input_config(tmp_path)
+        with caplog.at_level(logging.DEBUG, logger="resxr.io.readers"):
+            load_session(tmp_session_dir, config)
+        errors = [
+            r
+            for r in caplog.records
+            if r.levelno >= logging.ERROR and "Custom tables folder not found" in r.getMessage()
+        ]
+        assert errors == []
+
     def test_session_id_from_metadata(self, tmp_session_dir, tmp_path):
         """The session_id matches the value in session_metadata.json."""
         config = self._input_config(tmp_path)

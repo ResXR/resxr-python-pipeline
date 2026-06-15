@@ -458,7 +458,8 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     # CustomTables sidecar and the custom data-class CSVs.
     custom_dir = session_dir / f"{metadata.session_id}_CustomTables"
     if not custom_dir.is_dir():
-        logger.error("Custom tables folder not found: %s", custom_dir)
+        # Custom tables are optional; absence is normal, not an error.
+        logger.debug("No custom tables folder for this session: %s", custom_dir)
     custom_csvs = find_custom_class_csvs(custom_dir, metadata.session_id)
     custom_tables_data = {name: load_custom_class_csv(p) for name, p in custom_csvs.items()}
 
