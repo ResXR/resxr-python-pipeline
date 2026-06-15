@@ -44,8 +44,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://resxr.org"
-Repository = "https://github.com/ResXR/ResXR"
-"Bug Tracker" = "https://github.com/ResXR/ResXR/issues"
+Repository = "https://github.com/ResXR/resxr-python-pipeline"
+"Bug Tracker" = "https://github.com/ResXR/resxr-python-pipeline/issues"
 
 [project.scripts]
 resxr = "resxr.cli:main"
