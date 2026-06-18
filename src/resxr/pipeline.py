@@ -215,7 +215,7 @@ def process_session_from_mapping(
 
     # Generate report
     if config.report.enabled:
-        report_dir = bids.get_session_dir(session)
+        report_dir = config.report.output_dir or bids.get_session_dir(session)
         report_path = report_dir / f"{session.session_id}_report.html"
         reporter = ReportGenerator(config.report)
         reporter.generate(session, report_path, config=config)

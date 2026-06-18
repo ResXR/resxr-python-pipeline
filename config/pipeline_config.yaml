@@ -133,37 +133,9 @@ validation:
     - eyes_closed
     - clock_dropout
 
-  # Column groups for column-scoped validation checks.
-  # Each group defines a named set of columns; checks decide how to use them.
-  column_groups:
-    - name: "Left Hand"
-      description: "Left hand wrist position and rotation"
-      columns:
-        - Left_XRHand_Wrist_x
-        - Left_XRHand_Wrist_y
-        - Left_XRHand_Wrist_z
-        - Left_XRHand_Wrist_Rotation_x
-        - Left_XRHand_Wrist_Rotation_y
-        - Left_XRHand_Wrist_Rotation_z
-    - name: "Right Hand"
-      description: "Right hand wrist position and rotation"
-      columns:
-        - Right_XRHand_Wrist_x
-        - Right_XRHand_Wrist_y
-        - Right_XRHand_Wrist_z
-        - Right_XRHand_Wrist_Rotation_x
-        - Right_XRHand_Wrist_Rotation_y
-        - Right_XRHand_Wrist_Rotation_z
-
   # Optional per-check settings. All keys here are passed through to checks
   # via ValidationConfig.get(). Add or uncomment as needed.
   settings:
-    # Assign which column groups each check receives (by group name).
-    # If omitted, checks receive all configured column_groups.
-    check_column_groups:
-      hands_tracking_loss:
-        - "Left Hand"
-        - "Right Hand"
 
     # eyes_closed check thresholds (defaults used if omitted)
     # eyes_closed_threshold: 0.9
