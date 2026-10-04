@@ -292,7 +292,7 @@ def write_bids_output(
         relative_path = f"motion/{motion_path.name}"
         acq_time = "n/a"
         if session.metadata.utc_start:
-            acq_time = session.metadata.utc_start.strftime("%Y-%m-%dT%H:%M:%S.000")
+            acq_time = session.metadata.utc_start.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
         scans_entries.append(
             {

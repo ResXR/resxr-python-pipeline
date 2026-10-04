@@ -740,3 +740,33 @@ def test_masking_blanks_hand_and_gaze_measurements_only(tmp_path, minimal_config
     assert not out["Hands"]["LeftHand_Status_HandTracked"].isna().any()
     assert not out["Eyes"]["Node_EyeCenter_px"].isna().any()
     assert not out["Face"].isna().any().any()
+
+
+def test_pipeline_scans_acq_time_keeps_subseconds_and_utc(tmp_path, minimal_config_dict):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["utc_start_iso8601"] = "2026-06-10T10:14:19.4723370Z"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    cfg_path = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+        ],
+    )
+
+    run(str(cfg_path))
+
+    for session_dir in (
+        bids_root / "sub-01" / "ses-01",
+        bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01",
+    ):
+        (scans_path,) = session_dir.glob("*_scans.tsv")
+        scans = pd.read_csv(scans_path, sep="\t", dtype=str)
+        assert set(scans["acq_time"]) == {"2026-06-10T10:14:19.472337Z"}
