@@ -16,6 +16,7 @@ from pydantic import (
     Field,
     StrictBool,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -90,6 +91,12 @@ class ValidationConfig(ConfigModel):
     enabled_checks: list[str]
     column_groups: list[ColumnGroup] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("settings", mode="before")
+    @classmethod
+    def _empty_settings(cls, value: Any) -> Any:
+        """Treat a commented-out settings block as an empty mapping."""
+        return {} if value is None else value
 
     @model_validator(mode="after")
     def _no_duplicate_group_names(self) -> ValidationConfig:
