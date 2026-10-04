@@ -246,12 +246,15 @@ def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) 
         time columns (``timestamp``, ``timeSinceStartup``).
     """
     out = df.copy()
+    hardware_onset = None
 
     if "timestamp" in out.columns and len(out) > 0:
         ts_vals = out["timestamp"].values
         onset_idx = find_first_nonzero_index(ts_vals)
         offset_idx = find_last_nonzero_index(ts_vals)
         onset = float(ts_vals[onset_idx]) if onset_idx is not None else 0.0
+        if onset_idx is not None and GLOBAL_CLOCK_COLUMN in out.columns:
+            hardware_onset = onset
         if (
             global_onset is not None
             and onset_idx is not None
@@ -287,6 +290,13 @@ def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) 
         idx = out.columns.get_loc("latency") + 1 if "latency" in out.columns else 0
         out.insert(idx, "latency_global", latency_global)
         logger.debug(f"Added latency_global channel (global onset: {global_onset:.3f}s)")
+
+    # Other *_Time columns share the selected hardware clock's origin
+    if hardware_onset is not None:
+        for column in [c for c in out.columns if c.endswith("_Time")]:
+            values = pd.to_numeric(out[column], errors="coerce")
+            valid = np.isfinite(values) & (values != 0)
+            out[column] = (values - hardware_onset).where(valid, np.nan)
 
     # Remove internal time columns
     out = out.drop(columns=[c for c in _INTERNAL_TIME_COLS if c in out.columns])

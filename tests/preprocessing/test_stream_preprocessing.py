@@ -392,6 +392,36 @@ class TestPreprocessStream:
 
 
 class TestPrepareMotionData:
+    def test_all_sdk_time_columns_share_selected_origin_and_preserve_offsets(self):
+        df = pd.DataFrame(
+            {
+                "timestamp": [0.0, 100.0, 100.5, 101.0, 101.5],
+                "timeSinceStartup": [1.0, 1.5, 2.0, 2.5, 3.0],
+                "Node_HandRight_Time": [0.0, 100.0, 100.5, np.nan, 0.0],
+                "Node_EyeCenter_Time": [99.5, 100.0, np.inf, 101.0, 101.5],
+                "signal": [1, 2, 3, 4, 5],
+            },
+            index=[10, 20, 30, 40, 50],
+        )
+        original = df.copy(deep=True)
+        output = prepare_motion_data(df)
+        np.testing.assert_allclose(
+            output["Node_HandRight_Time"],
+            [np.nan, 0.0, 0.5, np.nan, np.nan],
+            rtol=0,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            output["Node_EyeCenter_Time"],
+            [-0.5, 0.0, np.nan, 1.0, 1.5],
+            rtol=0,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        assert output["latency"].iloc[2] == output["Node_HandRight_Time"].iloc[2]
+        pd.testing.assert_frame_equal(df, original)
+
     def test_timestamp_converted_to_latency(self, head_stream):
         """'latency' column exists; 'timestamp' is removed from output."""
         result = prepare_motion_data(head_stream.data)
