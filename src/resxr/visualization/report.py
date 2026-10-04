@@ -498,4 +498,4 @@ class ReportGenerator:
             categoryorder="array", categoryarray=list(reversed(stream_names)), row=2, col=1
         )
 
-        return fig.to_html(full_html=False, include_plotlyjs="cdn")
+        return fig.to_html(full_html=False, include_plotlyjs=True)

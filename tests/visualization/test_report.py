@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html.parser import HTMLParser
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -136,6 +138,24 @@ class TestReportGenerator:
         assert result.exists()
         # The flag info should appear somewhere in the report
         assert "test_check" in content
+
+    def test_generate_embeds_plotly_once_without_external_scripts(self, generator):
+        """The timeline includes one Plotly bundle and needs no external script."""
+        stream = self._stream_with_flag()
+        session = _minimal_session(streams={TrackingSystem.HEAD: stream})
+        content = generator.generate(session).read_text(encoding="utf-8")
+        script_sources = []
+
+        class ScriptParser(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                if tag == "script":
+                    source = dict(attrs).get("src")
+                    if source:
+                        script_sources.append(source)
+
+        ScriptParser().feed(content)
+        assert script_sources == []
+        assert content.count("plotly.js v") == 1
 
     @staticmethod
     def _stream_with_flag() -> TrackingStream:
