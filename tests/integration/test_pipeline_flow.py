@@ -641,3 +641,44 @@ def test_events_at_session_root_with_custom_class(tmp_path, minimal_config_dict)
     )
     assert "reaction_time" in events.columns
     assert "ChoiceEvent" in list(events["name"])
+
+
+def test_events_and_motion_share_the_main_data_time_zero(tmp_path, minimal_config_dict, caplog):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    bad_dir = _write_session_dir(data_dir, "sess_b", session_id="B")
+    bad = pd.read_csv(bad_dir / "B_ContinuousData.csv")
+    hardware = bad["timeSinceStartup"] + 100.0
+    bad = bad.assign(Node_Head_Time=hardware, Node_HandLeft_Time=hardware, timeSinceStartup=0.0)
+    bad.to_csv(bad_dir / "B_ContinuousData.csv", index=False)
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["face_enabled"] = True
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    face = pd.DataFrame({"timeSinceStartup": [1.011111, 1.022222], "Eyes_Closed_L": [0.0, 0.0]})
+    face.to_csv(session_dir / "A_FaceExpressionData.csv", index=False)
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_b", "subject_id": "02", "session_label": "01"},
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+        ],
+    )
+    run(str(cfg))
+    assert "no valid timeSinceStartup sample" in caplog.text
+    assert not (bids_root / "sub-02").exists()
+    session_out = bids_root / "sub-01" / "ses-01"
+    events = pd.read_csv(session_out / "sub-01_ses-01_task-vr_events.tsv", sep="\t")
+    assert list(events["onset"]) == pytest.approx([-1.0, -0.5, 0.0])
+    for system, first_latency in (("Head", 0.0), ("Face", 0.011111)):
+        (motion_path,) = (session_out / "motion").glob(f"*_tracksys-{system}_motion.tsv")
+        motion = pd.read_csv(motion_path, sep="\t", header=None)
+        assert motion[0].iloc[0] == pytest.approx(first_latency)

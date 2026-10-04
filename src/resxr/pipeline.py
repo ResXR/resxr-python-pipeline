@@ -186,6 +186,8 @@ def process_session_from_mapping(
         logger.warning(f"No valid streams found in {source_dir}")
         return None
 
+    session.initialize_motion_time_zero()
+
     check_registry.clear_failed_checks()
     for system, stream in session.streams.items():
         logger.info(f"Validating {system.value}")
@@ -194,7 +196,10 @@ def process_session_from_mapping(
         logger.info(f"  Found {len(flags)} quality flags")
 
     session.merged_events_data = merge_events(
-        session.raw_events_data, session.custom_tables_data, session.custom_tables
+        session.raw_events_data,
+        session.custom_tables_data,
+        session.custom_tables,
+        time_zero=session.motion_time_zero,
     )
 
     # Write RAW BIDS output (original data)
@@ -253,7 +258,7 @@ def write_bids_output(
             continue
 
         # Prepare for BIDS output (add LATENCY channels, strip internal time cols)
-        prepared = prepare_motion_data(data)
+        prepared = prepare_motion_data(data, global_onset=session.motion_time_zero)
 
         # Write motion.tsv (no header)
         motion_path = bids.get_motion_file(session, system, "tsv", derivative=derivative)

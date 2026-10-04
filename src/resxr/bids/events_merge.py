@@ -23,12 +23,21 @@ def merge_events(
     native_events_df: pd.DataFrame | None,
     custom_dfs: dict[str, pd.DataFrame],
     custom_tables: list[CustomTableSchema] | None = None,
+    *,
+    time_zero: float = 0.0,
 ) -> pd.DataFrame:
     """Merge native events and custom-class rows into one wide sparse frame.
 
     Always returns at least STANDARD_COLS. Missing cells become the string
     "n/a". Rows are sorted by onset ascending.
     """
+
+    def relative_frame(df: pd.DataFrame) -> pd.DataFrame:
+        part = df.copy()
+        if not part.empty and "onset" in part.columns:
+            part["onset"] = pd.to_numeric(part["onset"], errors="coerce") - time_zero
+        return part
+
     # 1. Reserved-name guard: no custom class may carry a 'name' column.
     for cls, df in custom_dfs.items():
         if "name" in df.columns:
@@ -101,11 +110,11 @@ def merge_events(
 
     # 5. Native rows already carry 'name'. Do not re-set it.
     if native_events_df is not None and not native_events_df.empty:
-        frames.append(native_events_df.copy())
+        frames.append(relative_frame(native_events_df))
 
     # 6. Custom rows get name = class name.
     for cls, df in custom_dfs.items():
-        part = df.copy()
+        part = relative_frame(df)
         part["name"] = cls
         frames.append(part)
 
@@ -136,7 +145,10 @@ def generate_events_sidecar(
     """
     sidecar: dict = {
         "onset": {
-            "Description": "Onset time of event in seconds relative to recording start",
+            "Description": (
+                "Onset time of event in seconds relative to the first valid global "
+                "motion sample, where latency_global is zero"
+            ),
             "Units": "s",
         },
         "duration": {

@@ -15,6 +15,7 @@ import pandas as pd
 
 from ..utils import find_first_nonzero_index, find_last_nonzero_index, find_recording_onset
 from .constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
+from .exceptions import DataLoadError
 from .logger import get_logger
 
 logger = get_logger(__name__)
@@ -360,6 +361,11 @@ class TrackingStream:
         return self.clean_data if self.clean_data is not None else self.data
 
 
+def _first_valid_sample(values: pd.Series) -> float | None:
+    """First finite, nonzero value of a clock column, or None if it has none."""
+    return find_recording_onset(pd.to_numeric(values, errors="coerce").to_numpy(dtype=float))
+
+
 @dataclass
 class Session:
     """
@@ -387,8 +393,26 @@ class Session:
     # Filled by merge_events just before BIDS events are written
     merged_events_data: pd.DataFrame | None = None
 
+    # Shared global clock origin, initialized once after streams are split.
+    motion_time_zero: float | None = None
+
     # Source paths for reference
     source_dir: str | None = None
+
+    def initialize_motion_time_zero(self) -> float:
+        """Set the time zero: the main data's first valid timeSinceStartup."""
+        time_zero = None
+        main = self.raw_continuous_data
+        if main is not None and "timestamp" in main.columns:
+            time_zero = _first_valid_sample(main["timestamp"])
+
+        if time_zero is None:
+            raise DataLoadError(
+                f"Session '{self.session_id}': the main continuous data has no valid "
+                f"{GLOBAL_CLOCK_COLUMN} sample."
+            )
+        self.motion_time_zero = time_zero
+        return time_zero
 
     @property
     def all_flags(self) -> list[QualityFlag]:

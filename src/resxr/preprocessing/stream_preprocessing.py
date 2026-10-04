@@ -203,7 +203,7 @@ def preprocess_stream(
 _INTERNAL_TIME_COLS = {"timestamp", GLOBAL_CLOCK_COLUMN}
 
 
-def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
+def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) -> pd.DataFrame:
     """
     Prepare a stream DataFrame for BIDS motion output.
 
@@ -231,6 +231,12 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
     df : pd.DataFrame
         Stream data containing ``timestamp`` and optionally
         ``timeSinceStartup`` (the original global Unity clock).
+    global_onset : float | None
+        Session's shared global motion time zero. Reused for raw and
+        derivative outputs. When the stream has no separate global clock,
+        ``timestamp`` itself is global and this origin applies to ``latency``.
+        It is ignored for a stream whose global clock has no valid sample,
+        which keeps its own timing.
 
     Returns
     -------
@@ -246,6 +252,12 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
         onset_idx = find_first_nonzero_index(ts_vals)
         offset_idx = find_last_nonzero_index(ts_vals)
         onset = float(ts_vals[onset_idx]) if onset_idx is not None else 0.0
+        if (
+            global_onset is not None
+            and onset_idx is not None
+            and GLOBAL_CLOCK_COLUMN not in out.columns
+        ):
+            onset = global_onset
 
         latency = out["timestamp"] - onset
         if onset_idx is not None and onset_idx > 0:
@@ -260,7 +272,10 @@ def prepare_motion_data(df: pd.DataFrame) -> pd.DataFrame:
         tsu_vals = out[GLOBAL_CLOCK_COLUMN].values
         global_onset_idx = find_first_nonzero_index(tsu_vals)
         global_offset_idx = find_last_nonzero_index(tsu_vals)
-        global_onset = float(tsu_vals[global_onset_idx]) if global_onset_idx is not None else 0.0
+        if global_onset is None or global_onset_idx is None:
+            global_onset = (
+                float(tsu_vals[global_onset_idx]) if global_onset_idx is not None else 0.0
+            )
 
         latency_global = out[GLOBAL_CLOCK_COLUMN] - global_onset
         if global_onset_idx is not None and global_onset_idx > 0:
