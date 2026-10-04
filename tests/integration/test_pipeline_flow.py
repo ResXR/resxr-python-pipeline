@@ -682,3 +682,61 @@ def test_events_and_motion_share_the_main_data_time_zero(tmp_path, minimal_confi
         (motion_path,) = (session_out / "motion").glob(f"*_tracksys-{system}_motion.tsv")
         motion = pd.read_csv(motion_path, sep="\t", header=None)
         assert motion[0].iloc[0] == pytest.approx(first_latency)
+
+
+def test_masking_blanks_hand_and_gaze_measurements_only(tmp_path, minimal_config_dict):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    session_dir = _write_session_dir(data_dir, "sess_m", session_id="M", with_events=False)
+    t = 1.0 + np.arange(8) / 10.0
+    flagged = np.array([False, False, True, True, False, False, False, False])
+    values = np.arange(8) + 0.5
+    continuous = {
+        "timeSinceStartup": t,
+        "Node_HandLeft_Time": t + 100.0,
+        "LeftHand_Root_px": values,
+        "LeftHand_Status_HandTracked": (~flagged).astype(int),
+        "Eyes_Time": t + 200.0,
+        "LeftEye_GazeOrigin_x": values,
+        "Node_EyeCenter_px": values,
+    }
+    pd.DataFrame(continuous).to_csv(session_dir / "M_ContinuousData.csv", index=False)
+    closed = np.where(flagged, 0.95, 0.0)
+    face = {"timeSinceStartup": t, "Face_Time": t + 300.0, "Eyes_Closed_L": closed}
+    face["Eyes_Closed_R"] = closed
+    pd.DataFrame(face).to_csv(session_dir / "M_FaceExpressionData.csv", index=False)
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.update(face_enabled=True, eyes_enabled=True)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    minimal_config_dict["validation"] = {
+        "enabled_checks": ["hands_tracking_loss", "eyes_closed"],
+        "settings": {"eyes_closed_use_min_duration": False},
+    }
+    minimal_config_dict["preprocessing"] = {
+        "apply_quality_masking": True,
+        "alternate_time_columns": {
+            "Hands": "Node_HandLeft_Time",
+            "Eyes": "Eyes_Time",
+            "Face": "Face_Time",
+        },
+    }
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[{"source_dir": "sess_m", "subject_id": "01", "session_label": "01"}],
+    )
+    run(str(cfg))
+    motion_dir = bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01" / "motion"
+    out = {}
+    for system in ("Hands", "Eyes", "Face"):
+        (motion_path,) = motion_dir.glob(f"*_tracksys-{system}_motion.tsv")
+        channels = pd.read_csv(str(motion_path).replace("_motion.tsv", "_channels.tsv"), sep="\t")
+        out[system] = pd.read_csv(motion_path, sep="\t", header=None, names=list(channels["name"]))
+    assert list(out["Hands"]["LeftHand_Root_px"].isna()) == list(flagged)
+    assert list(out["Eyes"]["LeftEye_GazeOrigin_x"].isna()) == list(flagged)
+    assert not out["Hands"]["LeftHand_Status_HandTracked"].isna().any()
+    assert not out["Eyes"]["Node_EyeCenter_px"].isna().any()
+    assert not out["Face"].isna().any().any()

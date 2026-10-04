@@ -192,7 +192,8 @@ def process_session_from_mapping(
     for system, stream in session.streams.items():
         logger.info(f"Validating {system.value}")
         flags = check_registry.run_all(stream, session, config.validation)
-        stream.quality_flags = flags
+        for flag in flags:
+            (session.get_stream(flag.system) or stream).quality_flags.append(flag)
         logger.info(f"  Found {len(flags)} quality flags")
 
     session.merged_events_data = merge_events(

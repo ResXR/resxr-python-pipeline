@@ -12,6 +12,7 @@ from ...core.config import ValidationConfig
 from ...core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
+from ...io.column_maps import get_gaze_measurement_columns
 from ..registry import register_check
 
 logger = get_logger(__name__)
@@ -81,7 +82,7 @@ class EyesClosedCheck:
                     system=TrackingSystem.FACE,
                     severity="info",
                     message=f"Both eyes closed (threshold ≥ {threshold})",
-                    should_mask=True,
+                    should_mask=False,
                     group_name="both_eyes",
                     target_columns=[col_left, col_right],
                 )
@@ -106,6 +107,7 @@ class EyesClosedCheck:
                         eyes_ts <= seg_end
                     )
                 if eyes_closed_mask_for_eyes_stream.any():
+                    target_columns = get_gaze_measurement_columns(eyes_stream.data.columns.tolist())
                     flags.extend(
                         QualityFlag.from_mask(
                             timestamps=eyes_ts,
@@ -114,9 +116,9 @@ class EyesClosedCheck:
                             system=TrackingSystem.EYES,
                             severity="info",
                             message="Eyes closed (from FACE stream)",
-                            should_mask=True,
+                            should_mask=bool(target_columns),
                             group_name="both_eyes",
-                            target_columns=[],
+                            target_columns=target_columns,
                         )
                     )
 
