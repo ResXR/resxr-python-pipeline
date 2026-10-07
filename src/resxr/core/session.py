@@ -296,25 +296,29 @@ class TrackingStream:
         return find_recording_onset(self.data["timestamp"].values)
 
     def _compute_effective_rate(self) -> None:
-        """Effective sampling rate from unique timestamps (start = first non-zero)."""
+        """Effective sampling rate from unique timestamps (start = first non-zero).
+
+        Raises DataLoadError when the stream cannot be timed, so the pipeline
+        skips that session and continues with the others.
+        """
         if "timestamp" not in self.data.columns:
-            raise ValueError(f"Stream {self.system.value}: missing 'timestamp' column")
+            raise DataLoadError(f"Stream {self.system.value}: missing 'timestamp' column")
         if len(self.data) < 2:
-            raise ValueError(
+            raise DataLoadError(
                 f"Stream {self.system.value}: need at least 2 rows to compute effective rate (got {len(self.data)})"
             )
         start = self._start_timestamp()
         if start is None:
-            raise ValueError(f"Stream {self.system.value}: no non-zero timestamp found")
+            raise DataLoadError(f"Stream {self.system.value}: no non-zero timestamp found")
         u = np.unique(self.data["timestamp"].values)
         u = u[u >= start]
         if u.size < 2:
-            raise ValueError(
+            raise DataLoadError(
                 f"Stream {self.system.value}: fewer than 2 unique timestamps from first non-zero"
             )
         total = u[-1] - u[0]
         if total <= 0:
-            raise ValueError(
+            raise DataLoadError(
                 f"Stream {self.system.value}: invalid timestamp span (total time <= 0)"
             )
         self.sampling_frequency_effective = (u.size - 1) / total

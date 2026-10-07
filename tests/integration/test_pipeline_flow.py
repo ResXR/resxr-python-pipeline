@@ -251,6 +251,76 @@ def test_pipeline_multi_session_partial_failure_continues(tmp_path, minimal_conf
     assert not (bids_root / "sub-02").exists()
 
 
+def _edit_continuous(session_dir: Path, edit) -> None:
+    (path,) = session_dir.glob("*_ContinuousData.csv")
+    edit(pd.read_csv(path)).to_csv(path, index=False)
+
+
+def _zero_hands_clock(session_dir: Path) -> None:
+    _edit_continuous(session_dir, lambda df: df.assign(Node_HandLeft_Time=0.0))
+
+
+def _zero_main_clock(session_dir: Path) -> None:
+    _edit_continuous(session_dir, lambda df: df.assign(timeSinceStartup=0.0))
+
+
+def _keep_one_row(session_dir: Path) -> None:
+    _edit_continuous(session_dir, lambda df: df.iloc[:1])
+
+
+def _add_face_file_without_clocks(session_dir: Path) -> None:
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["face_enabled"] = True
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    face = pd.DataFrame({"Eyes_Closed_L": [0.0, 0.0, 0.0]})
+    face.to_csv(session_dir / "BAD_FaceExpressionData.csv", index=False)
+
+
+@pytest.mark.parametrize(
+    ("make_untimeable", "message"),
+    [
+        (_zero_hands_clock, "Stream Hands: no non-zero timestamp found"),
+        (_zero_main_clock, "Stream Head: no non-zero timestamp found"),
+        (_keep_one_row, "Stream Head: need at least 2 rows"),
+        (_add_face_file_without_clocks, "Stream Face: missing 'timestamp' column"),
+    ],
+)
+def test_untimeable_session_is_skipped_and_the_run_continues(
+    tmp_path, minimal_config_dict, caplog, make_untimeable, message
+):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    for name, session_id in (("sess_bad", "BAD"), ("sess_good", "GOOD")):
+        session_dir = _write_session_dir(data_dir, name, session_id=session_id)
+        _edit_continuous(
+            session_dir, lambda df: df.assign(Node_HandLeft_Time=df["timeSinceStartup"] + 100.0)
+        )
+    make_untimeable(data_dir / "sess_bad")
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Hands": "Node_HandLeft_Time",
+        "Face": "Face_Time",
+    }
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_bad", "subject_id": "01", "session_label": "01"},
+            {"source_dir": "sess_good", "subject_id": "02", "session_label": "01"},
+        ],
+    )
+    run(str(cfg))
+    assert f"Failed to process sess_bad: {message}" in caplog.text
+    assert not (bids_root / "sub-01").exists()
+    assert list((bids_root / "sub-02" / "ses-01" / "motion").glob("*_motion.tsv"))
+    participants = pd.read_csv(bids_root / "participants.tsv", sep="\t")
+    assert list(participants["participant_id"]) == ["sub-02"]
+    assert (bids_root / "dataset_description.json").exists()
+    assert (bids_root / "README").exists()
+
+
 def test_motion_tsv_columns_match_channels_contract(tmp_path, minimal_config_dict):
     data_dir = tmp_path / "sessions"
     bids_root = tmp_path / "bids_out"

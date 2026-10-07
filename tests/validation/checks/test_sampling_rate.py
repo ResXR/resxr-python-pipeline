@@ -8,6 +8,7 @@ import pytest
 
 from resxr.core.config import ValidationConfig
 from resxr.core.constants import TrackingSystem
+from resxr.core.exceptions import DataLoadError
 from resxr.core.session import TrackingStream
 from resxr.validation.checks.sampling_rate import SamplingRateCheck
 
@@ -208,7 +209,7 @@ class TestSamplingRateEdgeCases:
         This documents that the check is never invoked on a 1-row stream because
         the TrackingStream constructor itself prevents it.
         """
-        with pytest.raises(ValueError, match="at least 2 rows"):
+        with pytest.raises(DataLoadError, match="at least 2 rows"):
             TrackingStream(
                 system=TrackingSystem.HEAD,
                 data=pd.DataFrame({"timestamp": [1.0], "Node_Head_px": [0.0]}),
@@ -221,7 +222,7 @@ class TestSamplingRateEdgeCases:
         This documents that the check is never invoked on a stream without
         timestamps because the TrackingStream constructor itself prevents it.
         """
-        with pytest.raises(ValueError, match="timestamp"):
+        with pytest.raises(DataLoadError, match="timestamp"):
             TrackingStream(
                 system=TrackingSystem.HEAD,
                 data=pd.DataFrame({"Node_Head_px": [0.0, 1.0, 2.0]}),
