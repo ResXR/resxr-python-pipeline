@@ -150,6 +150,7 @@ class TestTrackingStreamEdgeCases:
         [
             ([0.0, 0.0, 0.0], "no non-zero timestamp found"),
             ([0.0, 2.0, 2.0], "fewer than 2 unique timestamps"),
+            (["1.0", "abc", "2.0"], "non-numeric value in 'timestamp' column"),
         ],
     )
     def test_untimeable_stream_raises_data_load_error(self, timestamps, message):

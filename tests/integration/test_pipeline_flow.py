@@ -260,8 +260,27 @@ def _zero_hands_clock(session_dir: Path) -> None:
     _edit_continuous(session_dir, lambda df: df.assign(Node_HandLeft_Time=0.0))
 
 
-def _zero_main_clock(session_dir: Path) -> None:
-    _edit_continuous(session_dir, lambda df: df.assign(timeSinceStartup=0.0))
+def _zero_main_clock_without_head_clock(session_dir: Path) -> None:
+    _edit_continuous(
+        session_dir, lambda df: df.drop(columns="Node_Head_Time").assign(timeSinceStartup=0.0)
+    )
+
+
+def _put_text(column: str):
+    def edit(df: pd.DataFrame) -> pd.DataFrame:
+        values = df[column].astype(object)
+        values.iloc[1] = "abc"
+        return df.assign(**{column: values})
+
+    return edit
+
+
+def _text_in_main_clock(session_dir: Path) -> None:
+    _edit_continuous(session_dir, _put_text("timeSinceStartup"))
+
+
+def _text_in_hands_clock(session_dir: Path) -> None:
+    _edit_continuous(session_dir, _put_text("Node_HandLeft_Time"))
 
 
 def _keep_one_row(session_dir: Path) -> None:
@@ -281,7 +300,9 @@ def _add_face_file_without_clocks(session_dir: Path) -> None:
     ("make_untimeable", "message"),
     [
         (_zero_hands_clock, "Stream Hands: no non-zero timestamp found"),
-        (_zero_main_clock, "Stream Head: no non-zero timestamp found"),
+        (_zero_main_clock_without_head_clock, "Stream Head: no non-zero timestamp found"),
+        (_text_in_main_clock, "Stream Head: non-numeric value in 'timeSinceStartup' column"),
+        (_text_in_hands_clock, "Stream Hands: non-numeric value in 'timestamp' column"),
         (_keep_one_row, "Stream Head: need at least 2 rows"),
         (_add_face_file_without_clocks, "Stream Face: missing 'timestamp' column"),
     ],
@@ -294,10 +315,15 @@ def test_untimeable_session_is_skipped_and_the_run_continues(
     for name, session_id in (("sess_bad", "BAD"), ("sess_good", "GOOD")):
         session_dir = _write_session_dir(data_dir, name, session_id=session_id)
         _edit_continuous(
-            session_dir, lambda df: df.assign(Node_HandLeft_Time=df["timeSinceStartup"] + 100.0)
+            session_dir,
+            lambda df: df.assign(
+                Node_Head_Time=df["timeSinceStartup"] + 50.0,
+                Node_HandLeft_Time=df["timeSinceStartup"] + 100.0,
+            ),
         )
     make_untimeable(data_dir / "sess_bad")
     minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
         "Hands": "Node_HandLeft_Time",
         "Face": "Face_Time",
     }

@@ -303,6 +303,11 @@ class TrackingStream:
         """
         if "timestamp" not in self.data.columns:
             raise DataLoadError(f"Stream {self.system.value}: missing 'timestamp' column")
+        for column in ("timestamp", GLOBAL_CLOCK_COLUMN):
+            if column in self.data.columns and not pd.api.types.is_numeric_dtype(self.data[column]):
+                raise DataLoadError(
+                    f"Stream {self.system.value}: non-numeric value in '{column}' column"
+                )
         if len(self.data) < 2:
             raise DataLoadError(
                 f"Stream {self.system.value}: need at least 2 rows to compute effective rate (got {len(self.data)})"
