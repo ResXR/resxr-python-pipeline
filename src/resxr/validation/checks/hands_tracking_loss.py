@@ -11,6 +11,7 @@ from ...core.config import ValidationConfig
 from ...core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
+from ...io.column_maps import get_hand_measurement_columns
 from ..registry import register_check
 
 logger = get_logger(__name__)
@@ -65,6 +66,7 @@ class HandsTrackingLossCheck:
                 if column in df.columns:
                     tracking_lost = (df[column] == 0) | (df[column].isna())
                     if tracking_lost.any():
+                        target_columns = get_hand_measurement_columns(df.columns.tolist(), column)
                         flags.extend(
                             QualityFlag.from_mask(
                                 timestamps=ts_for_flags,
@@ -73,9 +75,9 @@ class HandsTrackingLossCheck:
                                 system=stream.system,
                                 severity="warning",
                                 message=f"Tracking loss detected: {hand} flag {column} indicates loss",
-                                should_mask=True,
+                                should_mask=bool(target_columns),
                                 group_name=hand,
-                                target_columns=[column],
+                                target_columns=target_columns,
                             )
                         )
 

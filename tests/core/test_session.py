@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from resxr.core.constants import TrackingSystem
+from resxr.core.exceptions import DataLoadError
 from resxr.core.session import (
     ColumnInfoEntry,
     CustomTableSchema,
@@ -143,6 +144,20 @@ class TestTrackingStreamEdgeCases:
             sampling_frequency=90.0,
         )
         assert stream._start_timestamp() is None
+
+    @pytest.mark.parametrize(
+        ("timestamps", "message"),
+        [
+            ([0.0, 0.0, 0.0], "no non-zero timestamp found"),
+            ([0.0, 2.0, 2.0], "fewer than 2 unique timestamps"),
+            (["1.0", "abc", "2.0"], "non-numeric value in 'timestamp' column"),
+        ],
+    )
+    def test_untimeable_stream_raises_data_load_error(self, timestamps, message):
+        """A stream that cannot be timed raises DataLoadError, so its session is skipped."""
+        df = pd.DataFrame({"timestamp": timestamps, "Node_Head_px": [0.0, 0.0, 0.0]})
+        with pytest.raises(DataLoadError, match=message):
+            TrackingStream(system=TrackingSystem.HEAD, data=df, sampling_frequency=90.0)
 
 
 # ===========================================================================

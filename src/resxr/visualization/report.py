@@ -158,6 +158,9 @@ class ReportGenerator:
             # Summary stats
             "total_duration": session.total_duration_seconds,
             "total_warnings": session.total_warning_count,
+            "hand_joint_frames": ", ".join(
+                f"{side} {frame}" for side, frame in session.hand_joint_frames.items()
+            ),
             # Per-stream info
             "streams": self._stream_stats(session),
             # Quality flags (times relative to global recording onset)
@@ -498,4 +501,4 @@ class ReportGenerator:
             categoryorder="array", categoryarray=list(reversed(stream_names)), row=2, col=1
         )
 
-        return fig.to_html(full_html=False, include_plotlyjs="cdn")
+        return fig.to_html(full_html=False, include_plotlyjs=True)

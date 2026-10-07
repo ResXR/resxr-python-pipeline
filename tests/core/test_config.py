@@ -28,6 +28,12 @@ from resxr.core.exceptions import ConfigurationError
 
 
 class TestFromYaml:
+    def test_shipped_config_loads(self):
+        """The configuration used by the README command loads successfully."""
+        path = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
+        cfg = PipelineConfig.from_yaml(path)
+        assert cfg.validation.settings == {}
+
     def test_valid_config_loads_successfully(self, tmp_config_yaml):
         """A valid YAML file produces a PipelineConfig without errors."""
         cfg = PipelineConfig.from_yaml(tmp_config_yaml)

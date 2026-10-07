@@ -16,6 +16,7 @@ from pydantic import (
     Field,
     StrictBool,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -91,6 +92,12 @@ class ValidationConfig(ConfigModel):
     column_groups: list[ColumnGroup] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("settings", mode="before")
+    @classmethod
+    def _empty_settings(cls, value: Any) -> Any:
+        """Treat a commented-out settings block as an empty mapping."""
+        return {} if value is None else value
+
     @model_validator(mode="after")
     def _no_duplicate_group_names(self) -> ValidationConfig:
         """Reject duplicate column group names with a clear config error."""
@@ -163,6 +170,18 @@ class ReferenceFrameConfig(ConfigModel):
     spatial_axes: str
 
 
+class TrackingSpaceFrameConfig(ConfigModel):
+    """Reference frame level for hand joints recorded in the SDK's raw tracking space."""
+
+    description: str = (
+        "Meta tracking space as returned by the SDK: OpenXR right-handed axes, "
+        "+X right, +Y up, -Z forward."
+    )
+    rotation_rule: str = "right-hand"
+    rotation_order: str | None = None  # None: same as reference_frame.rotation_order
+    spatial_axes: str = "RSP"
+
+
 class BIDSConfig(ConfigModel):
     """Configuration for BIDS specification values."""
 
@@ -172,6 +191,9 @@ class BIDSConfig(ConfigModel):
     authors: list[str] = Field(default_factory=list)
     readme_text: str = ""
     reference_frame: ReferenceFrameConfig
+    tracking_space_reference_frame: TrackingSpaceFrameConfig = Field(
+        default_factory=TrackingSpaceFrameConfig
+    )
 
 
 class PipelineConfig(ConfigModel):

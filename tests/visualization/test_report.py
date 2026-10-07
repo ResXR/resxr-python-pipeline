@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html.parser import HTMLParser
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -103,6 +105,14 @@ class TestReportGenerator:
         content = result.read_text(encoding="utf-8")
         assert "report_test_001" in content
 
+    def test_generate_shows_hand_joint_frame(self, generator):
+        session = _minimal_session()
+        assert "Hand joint frame" not in generator.generate(session).read_text(encoding="utf-8")
+        session.hand_joint_frames = {"Left": "tracking_space", "Right": "global"}
+        content = generator.generate(session).read_text(encoding="utf-8")
+        assert "<th>Hand joint frame</th>" in content
+        assert "<td>Left tracking_space, Right global</td>" in content
+
     def test_generate_respects_explicit_output_path(self, generator, tmp_path):
         session = _minimal_session()
         explicit = tmp_path / "custom_report.html"
@@ -136,6 +146,24 @@ class TestReportGenerator:
         assert result.exists()
         # The flag info should appear somewhere in the report
         assert "test_check" in content
+
+    def test_generate_embeds_plotly_once_without_external_scripts(self, generator):
+        """The timeline includes one Plotly bundle and needs no external script."""
+        stream = self._stream_with_flag()
+        session = _minimal_session(streams={TrackingSystem.HEAD: stream})
+        content = generator.generate(session).read_text(encoding="utf-8")
+        script_sources = []
+
+        class ScriptParser(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                if tag == "script":
+                    source = dict(attrs).get("src")
+                    if source:
+                        script_sources.append(source)
+
+        ScriptParser().feed(content)
+        assert script_sources == []
+        assert content.count("plotly.js v") == 1
 
     @staticmethod
     def _stream_with_flag() -> TrackingStream:

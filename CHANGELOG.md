@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
+## [0.2.2] - 2026-10-04
+
+### Fixed
+
+- The shipped configuration loads: an empty `validation.settings` block is read as `{}`.
+- Event onsets in `events.tsv` are relative to the session's motion time zero (the first valid `timeSinceStartup`, where `latency_global` is 0).
+- Quality masking (only with `apply_quality_masking: true`): hand tracking loss masks that hand's measurements and keeps its status columns; eye closure masks only the Eyes gaze values, not the Face stream or the head-tracked `Node_EyeCenter` pose.
+- The HTML quality report embeds plotly.js once and loads nothing from the internet.
+- In a stream with a selected hardware clock, the other `*_Time` columns are converted to that clock's time base.
+- The package version is 0.2.2 in `pyproject.toml` and `uv.lock`.
+- `acq_time` in `scans.tsv` keeps the recorded fraction of a second and the `Z` that marks UTC, and is read on Python 3.10.
+- Hand-joint channels (`Left_XRHand_*`, `Right_XRHand_*`) in `channels.tsv` name the frame the session recorded them in, detected per hand: `global` when the Wrist joint equals the hand root, `tracking_space` when the joints are the SDK's raw tracking-space values (as in the demo data), or `n/a` with a warning; `channels.json` describes `tracking_space` when it is used, and the quality report names the frame. Values are unchanged.
+- A session in which a stream cannot be timed (its clock or its `timeSinceStartup` column holds a non-numeric value, its clock has no nonzero value or fewer than two distinct times, the stream has a single row, or the face file has neither `timeSinceStartup` nor `Face_Time`) is logged as an error and skipped, and the run continues with the other sessions; before, it stopped the whole run.
+
 ## [0.2.0] - 2026-06-15
 
 This release adds experiment-defined custom data tables, a unified BIDS events
@@ -115,7 +129,8 @@ First public release of the ResXR Python pipeline:
 - Self-contained HTML quality report.
 - Command-line interface and programmatic Python API.
 
-[Unreleased]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.2.1...v0.2.2
 [0.2.0]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ResXR/resxr-python-pipeline/releases/tag/v0.1.0

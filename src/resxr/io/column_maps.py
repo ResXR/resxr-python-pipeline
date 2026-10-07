@@ -135,6 +135,42 @@ def _is_face_blend_shape(column_name: str) -> bool:
     return any(column_name.startswith(p) for p in face_prefixes)
 
 
+def get_hand_measurement_columns(all_columns: list[str], tracking_column: str) -> list[str]:
+    """One hand's measurement columns (not status, validity or timing)."""
+    hand_prefixes = SYSTEM_COLUMN_PREFIXES[TrackingSystem.HANDS]
+    detection_prefix = next(
+        (prefix for prefix in hand_prefixes if tracking_column.startswith(prefix)), None
+    )
+    if detection_prefix is None:
+        return []
+
+    side = next((side for side in ("left", "right") if side in detection_prefix.lower()), None)
+    if side is None:
+        return []
+    side_prefixes = tuple(prefix for prefix in hand_prefixes if side in prefix.lower())
+
+    measurements = []
+    for column in all_columns:
+        if not column.startswith(side_prefixes):
+            continue
+        if "_Status_" in column or column.endswith(("_RequestedTS", "_SampleTS")):
+            continue
+        channel_type, _, units = infer_bids_channel_info(column)
+        if channel_type != "LATENCY" and units != "boolean":
+            measurements.append(column)
+    return measurements
+
+
+def get_gaze_measurement_columns(all_columns: list[str]) -> list[str]:
+    """Eyes position and orientation columns, except the head-tracked Node_EyeCenter."""
+    return [
+        column
+        for column in get_columns_for_system(all_columns, TrackingSystem.EYES)
+        if infer_bids_channel_info(column)[0] in {"POS", "ORNT"}
+        and not column.startswith("Node_EyeCenter_")
+    ]
+
+
 def extract_tracked_point(column_name: str) -> str:
     """
     Extract the tracked point name from a column name.

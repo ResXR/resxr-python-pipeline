@@ -7,6 +7,7 @@ Handles loading CSV tracking data and JSON metadata files.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -220,8 +221,9 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
     utc_str = data.get("utc_start_iso8601", "")
     if utc_str:
         try:
-            # Handle various ISO 8601 formats (fromisoformat supports both with/without fractional seconds)
+            # Unity writes 7 subsecond digits; Python 3.10's fromisoformat needs 3 or 6.
             utc_str = utc_str.rstrip("Z")
+            utc_str = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), utc_str)
             utc_start = datetime.fromisoformat(utc_str)
         except ValueError:
             logger.warning(f"Could not parse UTC timestamp: {utc_str}")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -248,6 +249,102 @@ def test_pipeline_multi_session_partial_failure_continues(tmp_path, minimal_conf
 
     assert (bids_root / "sub-01" / "ses-01" / "motion").exists()
     assert not (bids_root / "sub-02").exists()
+
+
+def _edit_continuous(session_dir: Path, edit) -> None:
+    (path,) = session_dir.glob("*_ContinuousData.csv")
+    edit(pd.read_csv(path)).to_csv(path, index=False)
+
+
+def _zero_hands_clock(session_dir: Path) -> None:
+    _edit_continuous(session_dir, lambda df: df.assign(Node_HandLeft_Time=0.0))
+
+
+def _zero_main_clock_without_head_clock(session_dir: Path) -> None:
+    _edit_continuous(
+        session_dir, lambda df: df.drop(columns="Node_Head_Time").assign(timeSinceStartup=0.0)
+    )
+
+
+def _put_text(column: str):
+    def edit(df: pd.DataFrame) -> pd.DataFrame:
+        values = df[column].astype(object)
+        values.iloc[1] = "abc"
+        return df.assign(**{column: values})
+
+    return edit
+
+
+def _text_in_main_clock(session_dir: Path) -> None:
+    _edit_continuous(session_dir, _put_text("timeSinceStartup"))
+
+
+def _text_in_hands_clock(session_dir: Path) -> None:
+    _edit_continuous(session_dir, _put_text("Node_HandLeft_Time"))
+
+
+def _keep_one_row(session_dir: Path) -> None:
+    _edit_continuous(session_dir, lambda df: df.iloc[:1])
+
+
+def _add_face_file_without_clocks(session_dir: Path) -> None:
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["face_enabled"] = True
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    face = pd.DataFrame({"Eyes_Closed_L": [0.0, 0.0, 0.0]})
+    face.to_csv(session_dir / "BAD_FaceExpressionData.csv", index=False)
+
+
+@pytest.mark.parametrize(
+    ("make_untimeable", "message"),
+    [
+        (_zero_hands_clock, "Stream Hands: no non-zero timestamp found"),
+        (_zero_main_clock_without_head_clock, "Stream Head: no non-zero timestamp found"),
+        (_text_in_main_clock, "Stream Head: non-numeric value in 'timeSinceStartup' column"),
+        (_text_in_hands_clock, "Stream Hands: non-numeric value in 'timestamp' column"),
+        (_keep_one_row, "Stream Head: need at least 2 rows"),
+        (_add_face_file_without_clocks, "Stream Face: missing 'timestamp' column"),
+    ],
+)
+def test_untimeable_session_is_skipped_and_the_run_continues(
+    tmp_path, minimal_config_dict, caplog, make_untimeable, message
+):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    for name, session_id in (("sess_bad", "BAD"), ("sess_good", "GOOD")):
+        session_dir = _write_session_dir(data_dir, name, session_id=session_id)
+        _edit_continuous(
+            session_dir,
+            lambda df: df.assign(
+                Node_Head_Time=df["timeSinceStartup"] + 50.0,
+                Node_HandLeft_Time=df["timeSinceStartup"] + 100.0,
+            ),
+        )
+    make_untimeable(data_dir / "sess_bad")
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+        "Face": "Face_Time",
+    }
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_bad", "subject_id": "01", "session_label": "01"},
+            {"source_dir": "sess_good", "subject_id": "02", "session_label": "01"},
+        ],
+    )
+    run(str(cfg))
+    assert f"Failed to process sess_bad: {message}" in caplog.text
+    assert not (bids_root / "sub-01").exists()
+    assert list((bids_root / "sub-02" / "ses-01" / "motion").glob("*_motion.tsv"))
+    participants = pd.read_csv(bids_root / "participants.tsv", sep="\t")
+    assert list(participants["participant_id"]) == ["sub-02"]
+    assert (bids_root / "dataset_description.json").exists()
+    assert (bids_root / "README").exists()
 
 
 def test_motion_tsv_columns_match_channels_contract(tmp_path, minimal_config_dict):
@@ -641,3 +738,169 @@ def test_events_at_session_root_with_custom_class(tmp_path, minimal_config_dict)
     )
     assert "reaction_time" in events.columns
     assert "ChoiceEvent" in list(events["name"])
+
+
+def test_events_and_motion_share_the_main_data_time_zero(tmp_path, minimal_config_dict, caplog):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    bad_dir = _write_session_dir(data_dir, "sess_b", session_id="B")
+    bad = pd.read_csv(bad_dir / "B_ContinuousData.csv")
+    hardware = bad["timeSinceStartup"] + 100.0
+    bad = bad.assign(Node_Head_Time=hardware, Node_HandLeft_Time=hardware, timeSinceStartup=0.0)
+    bad.to_csv(bad_dir / "B_ContinuousData.csv", index=False)
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["face_enabled"] = True
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    face = pd.DataFrame({"timeSinceStartup": [1.011111, 1.022222], "Eyes_Closed_L": [0.0, 0.0]})
+    face.to_csv(session_dir / "A_FaceExpressionData.csv", index=False)
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_b", "subject_id": "02", "session_label": "01"},
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+        ],
+    )
+    run(str(cfg))
+    assert "no valid timeSinceStartup sample" in caplog.text
+    assert not (bids_root / "sub-02").exists()
+    session_out = bids_root / "sub-01" / "ses-01"
+    events = pd.read_csv(session_out / "sub-01_ses-01_task-vr_events.tsv", sep="\t")
+    assert list(events["onset"]) == pytest.approx([-1.0, -0.5, 0.0])
+    for system, first_latency in (("Head", 0.0), ("Face", 0.011111)):
+        (motion_path,) = (session_out / "motion").glob(f"*_tracksys-{system}_motion.tsv")
+        motion = pd.read_csv(motion_path, sep="\t", header=None)
+        assert motion[0].iloc[0] == pytest.approx(first_latency)
+
+
+def test_masking_blanks_hand_and_gaze_measurements_only(tmp_path, minimal_config_dict):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    session_dir = _write_session_dir(data_dir, "sess_m", session_id="M", with_events=False)
+    t = 1.0 + np.arange(8) / 10.0
+    flagged = np.array([False, False, True, True, False, False, False, False])
+    values = np.arange(8) + 0.5
+    continuous = {
+        "timeSinceStartup": t,
+        "Node_HandLeft_Time": t + 100.0,
+        "LeftHand_Root_px": values,
+        "LeftHand_Status_HandTracked": (~flagged).astype(int),
+        "Eyes_Time": t + 200.0,
+        "LeftEye_GazeOrigin_x": values,
+        "Node_EyeCenter_px": values,
+    }
+    pd.DataFrame(continuous).to_csv(session_dir / "M_ContinuousData.csv", index=False)
+    closed = np.where(flagged, 0.95, 0.0)
+    face = {"timeSinceStartup": t, "Face_Time": t + 300.0, "Eyes_Closed_L": closed}
+    face["Eyes_Closed_R"] = closed
+    pd.DataFrame(face).to_csv(session_dir / "M_FaceExpressionData.csv", index=False)
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata.update(face_enabled=True, eyes_enabled=True)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    minimal_config_dict["validation"] = {
+        "enabled_checks": ["hands_tracking_loss", "eyes_closed"],
+        "settings": {"eyes_closed_use_min_duration": False},
+    }
+    minimal_config_dict["preprocessing"] = {
+        "apply_quality_masking": True,
+        "alternate_time_columns": {
+            "Hands": "Node_HandLeft_Time",
+            "Eyes": "Eyes_Time",
+            "Face": "Face_Time",
+        },
+    }
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[{"source_dir": "sess_m", "subject_id": "01", "session_label": "01"}],
+    )
+    run(str(cfg))
+    motion_dir = bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01" / "motion"
+    out = {}
+    for system in ("Hands", "Eyes", "Face"):
+        (motion_path,) = motion_dir.glob(f"*_tracksys-{system}_motion.tsv")
+        channels = pd.read_csv(str(motion_path).replace("_motion.tsv", "_channels.tsv"), sep="\t")
+        out[system] = pd.read_csv(motion_path, sep="\t", header=None, names=list(channels["name"]))
+    assert list(out["Hands"]["LeftHand_Root_px"].isna()) == list(flagged)
+    assert list(out["Eyes"]["LeftEye_GazeOrigin_x"].isna()) == list(flagged)
+    assert not out["Hands"]["LeftHand_Status_HandTracked"].isna().any()
+    assert not out["Eyes"]["Node_EyeCenter_px"].isna().any()
+    assert not out["Face"].isna().any().any()
+
+
+def test_pipeline_scans_acq_time_keeps_subseconds_and_utc(tmp_path, minimal_config_dict):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["utc_start_iso8601"] = "2026-06-10T10:14:19.4723370Z"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    cfg_path = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+        ],
+    )
+
+    run(str(cfg_path))
+
+    for session_dir in (
+        bids_root / "sub-01" / "ses-01",
+        bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01",
+    ):
+        (scans_path,) = session_dir.glob("*_scans.tsv")
+        scans = pd.read_csv(scans_path, sep="\t", dtype=str)
+        assert set(scans["acq_time"]) == {"2026-06-10T10:14:19.472337Z"}
+
+
+def test_hand_joint_channels_carry_the_detected_frame(tmp_path, minimal_config_dict, caplog):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    session_dir = _write_session_dir(data_dir, "sess_h", session_id="H")
+    continuous = pd.read_csv(session_dir / "H_ContinuousData.csv")
+    root = {"py": 1.0, "pz": 0.2, "qx": 0.1, "qy": 0.2, "qz": 0.3, "qw": 0.927}
+    wrist = {"x": continuous["LeftHand_Root_px"], "y": 1.0, "z": -0.2, "qx": -0.1, "qy": -0.2}
+    wrist.update(qz=0.3, qw=0.927)
+    continuous = continuous.assign(
+        **{f"LeftHand_Root_{key}": value for key, value in root.items()},
+        **{f"Left_XRHand_Wrist_{key}": value for key, value in wrist.items()},
+    )
+    continuous.to_csv(session_dir / "H_ContinuousData.csv", index=False)
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[{"source_dir": "sess_h", "subject_id": "01", "session_label": "01"}],
+    )
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        run(str(cfg))
+    assert "Hand joint frame in H: Left tracking_space" in caplog.text
+    for session_out in (bids_root, bids_root / "derivatives" / "resxr"):
+        motion_dir = session_out / "sub-01" / "ses-01" / "motion"
+        (channels_path,) = motion_dir.glob("*_tracksys-Hands_channels.tsv")
+        channels = pd.read_csv(channels_path, sep="\t")
+        frames = dict(zip(channels["name"], channels["reference_frame"], strict=True))
+        assert frames["Left_XRHand_Wrist_z"] == "tracking_space"
+        assert frames["LeftHand_Root_pz"] == "global"
+        sidecar = json.loads(channels_path.with_suffix(".json").read_text(encoding="utf-8"))
+        assert set(sidecar["reference_frame"]["Levels"]) == {"global", "tracking_space"}
+        (head_json,) = motion_dir.glob("*_tracksys-Head_channels.json")
+        head_sidecar = json.loads(head_json.read_text(encoding="utf-8"))
+        assert set(head_sidecar["reference_frame"]["Levels"]) == {"global"}
