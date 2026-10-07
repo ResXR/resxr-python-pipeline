@@ -20,6 +20,7 @@ _Nothing yet._
 - In a stream with a selected hardware clock, the other `*_Time` columns are converted to that clock's time base.
 - The package version is 0.2.2 in `pyproject.toml` and `uv.lock`.
 - `acq_time` in `scans.tsv` keeps the recorded fraction of a second and the `Z` that marks UTC, and is read on Python 3.10.
+- Hand-joint channels (`Left_XRHand_*`, `Right_XRHand_*`) in `channels.tsv` name the frame the session recorded them in, detected per hand: `global` when the Wrist joint equals the hand root, `tracking_space` when the joints are the SDK's raw tracking-space values (as in the demo data), or `n/a` with a warning; `channels.json` describes `tracking_space` when it is used, and the quality report names the frame. Values are unchanged.
 
 ## [0.2.0] - 2026-06-15
 
