@@ -105,6 +105,14 @@ class TestReportGenerator:
         content = result.read_text(encoding="utf-8")
         assert "report_test_001" in content
 
+    def test_generate_shows_hand_joint_frame(self, generator):
+        session = _minimal_session()
+        assert "Hand joint frame" not in generator.generate(session).read_text(encoding="utf-8")
+        session.hand_joint_frames = {"Left": "tracking_space", "Right": "global"}
+        content = generator.generate(session).read_text(encoding="utf-8")
+        assert "<th>Hand joint frame</th>" in content
+        assert "<td>Left tracking_space, Right global</td>" in content
+
     def test_generate_respects_explicit_output_path(self, generator, tmp_path):
         session = _minimal_session()
         explicit = tmp_path / "custom_report.html"

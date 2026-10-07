@@ -118,6 +118,12 @@
                     <th>Warnings</th>
                     <td>{{ total_warnings }}</td>
                 </tr>
+                {% if hand_joint_frames %}
+                <tr>
+                    <th>Hand joint frame</th>
+                    <td>{{ hand_joint_frames }}</td>
+                </tr>
+                {% endif %}
             </table>
         </section>
 
