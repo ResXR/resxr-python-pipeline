@@ -396,6 +396,9 @@ class Session:
     # Shared global clock origin, initialized once after streams are split.
     motion_time_zero: float | None = None
 
+    # Frame of each hand's XRHand joint poses ("Left"/"Right" -> reference_frame level)
+    hand_joint_frames: dict[str, str] = field(default_factory=dict)
+
     # Source paths for reference
     source_dir: str | None = None
 

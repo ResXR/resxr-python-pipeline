@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -770,3 +771,40 @@ def test_pipeline_scans_acq_time_keeps_subseconds_and_utc(tmp_path, minimal_conf
         (scans_path,) = session_dir.glob("*_scans.tsv")
         scans = pd.read_csv(scans_path, sep="\t", dtype=str)
         assert set(scans["acq_time"]) == {"2026-06-10T10:14:19.472337Z"}
+
+
+def test_hand_joint_channels_carry_the_detected_frame(tmp_path, minimal_config_dict, caplog):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    session_dir = _write_session_dir(data_dir, "sess_h", session_id="H")
+    continuous = pd.read_csv(session_dir / "H_ContinuousData.csv")
+    root = {"py": 1.0, "pz": 0.2, "qx": 0.1, "qy": 0.2, "qz": 0.3, "qw": 0.927}
+    wrist = {"x": continuous["LeftHand_Root_px"], "y": 1.0, "z": -0.2, "qx": -0.1, "qy": -0.2}
+    wrist.update(qz=0.3, qw=0.927)
+    continuous = continuous.assign(
+        **{f"LeftHand_Root_{key}": value for key, value in root.items()},
+        **{f"Left_XRHand_Wrist_{key}": value for key, value in wrist.items()},
+    )
+    continuous.to_csv(session_dir / "H_ContinuousData.csv", index=False)
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[{"source_dir": "sess_h", "subject_id": "01", "session_label": "01"}],
+    )
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        run(str(cfg))
+    assert "Hand joint frame in H: Left tracking_space" in caplog.text
+    for session_out in (bids_root, bids_root / "derivatives" / "resxr"):
+        motion_dir = session_out / "sub-01" / "ses-01" / "motion"
+        (channels_path,) = motion_dir.glob("*_tracksys-Hands_channels.tsv")
+        channels = pd.read_csv(channels_path, sep="\t")
+        frames = dict(zip(channels["name"], channels["reference_frame"], strict=True))
+        assert frames["Left_XRHand_Wrist_z"] == "tracking_space"
+        assert frames["LeftHand_Root_pz"] == "global"
+        sidecar = json.loads(channels_path.with_suffix(".json").read_text(encoding="utf-8"))
+        assert set(sidecar["reference_frame"]["Levels"]) == {"global", "tracking_space"}
+        (head_json,) = motion_dir.glob("*_tracksys-Head_channels.json")
+        head_sidecar = json.loads(head_json.read_text(encoding="utf-8"))
+        assert set(head_sidecar["reference_frame"]["Levels"]) == {"global"}

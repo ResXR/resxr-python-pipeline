@@ -170,6 +170,18 @@ class ReferenceFrameConfig(ConfigModel):
     spatial_axes: str
 
 
+class TrackingSpaceFrameConfig(ConfigModel):
+    """Reference frame level for hand joints recorded in the SDK's raw tracking space."""
+
+    description: str = (
+        "Meta tracking space as returned by the SDK: OpenXR right-handed axes, "
+        "+X right, +Y up, -Z forward."
+    )
+    rotation_rule: str = "right-hand"
+    rotation_order: str | None = None  # None: same as reference_frame.rotation_order
+    spatial_axes: str = "RSP"
+
+
 class BIDSConfig(ConfigModel):
     """Configuration for BIDS specification values."""
 
@@ -179,6 +191,9 @@ class BIDSConfig(ConfigModel):
     authors: list[str] = Field(default_factory=list)
     readme_text: str = ""
     reference_frame: ReferenceFrameConfig
+    tracking_space_reference_frame: TrackingSpaceFrameConfig = Field(
+        default_factory=TrackingSpaceFrameConfig
+    )
 
 
 class PipelineConfig(ConfigModel):

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .bids.channels import generate_channels_tsv
+from .bids.channels import TRACKING_SPACE_FRAME, detect_hand_joint_frames, generate_channels_tsv
 from .bids.events_merge import generate_events_sidecar, merge_events
 from .bids.layout import BIDSLayout
 from .bids.metadata import (
@@ -32,6 +32,7 @@ from .bids.metadata import (
     generate_participants_json,
 )
 from .core.config import PipelineConfig, SessionMapping
+from .core.constants import TrackingSystem
 from .core.exceptions import ResXRError
 from .core.logger import get_logger
 from .core.session import Session
@@ -188,6 +189,13 @@ def process_session_from_mapping(
 
     session.initialize_motion_time_zero()
 
+    hands = session.get_stream(TrackingSystem.HANDS)
+    if hands is not None:
+        session.hand_joint_frames = detect_hand_joint_frames(hands.data, session.session_id)
+    if session.hand_joint_frames:
+        frames = ", ".join(f"{side} {frame}" for side, frame in session.hand_joint_frames.items())
+        logger.info(f"Hand joint frame in {session.session_id}: {frames}")
+
     check_registry.clear_failed_checks()
     for system, stream in session.streams.items():
         logger.info(f"Validating {system.value}")
@@ -280,12 +288,19 @@ def write_bids_output(
 
         # Write channels.tsv
         channels_path = bids.get_channels_file(session, system, "tsv", derivative=derivative)
-        channels_df = generate_channels_tsv(prepared, stream.sampling_frequency)
+        channels_df = generate_channels_tsv(
+            prepared, stream.sampling_frequency, session.hand_joint_frames
+        )
         write_channels_tsv(channels_df, channels_path)
 
         # Write channels.json
         channels_json_path = bids.get_channels_file(session, system, "json", derivative=derivative)
-        channels_meta = generate_channels_json(config.bids)
+        channels_meta = generate_channels_json(
+            config.bids,
+            include_tracking_space=bool(
+                (channels_df["reference_frame"] == TRACKING_SPACE_FRAME).any()
+            ),
+        )
         write_json(channels_meta, channels_json_path)
 
         # Add to scans list

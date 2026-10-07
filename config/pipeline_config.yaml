@@ -21,6 +21,13 @@ bids:
     rotation_rule: "left-hand"
     rotation_order: "ZXY"
     spatial_axes: "RSA"
+  # Level for hand-joint channels (Left_XRHand_*, Right_XRHand_*) of sessions whose
+  # joints are the SDK's raw tracking-space values (detected per session). Written to
+  # channels.json only when used. rotation_order defaults to reference_frame's.
+  tracking_space_reference_frame:
+    description: "Meta tracking space as returned by the SDK: OpenXR right-handed axes, +X right, +Y up, -Z forward."
+    rotation_rule: "right-hand"
+    spatial_axes: "RSP"
 
 # Sampling Frequencies (Hz)
 # -------------------------

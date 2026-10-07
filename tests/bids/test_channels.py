@@ -2,15 +2,49 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from resxr.bids.channels import generate_channels_tsv
+from resxr.bids.channels import detect_hand_joint_frames, generate_channels_tsv
+from resxr.io.readers import load_continuous_data
+
+_MUSEUM_CSV = (
+    Path(__file__).resolve().parents[2]
+    / "DATA"
+    / "Demo_Data"
+    / "Museum"
+    / "2026.06.10_18-42"
+    / "2026.06.10_18-42_ContinuousData.csv"
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _left_hand_df(wrist_frame: str, n: int = 20) -> pd.DataFrame:
+    """Left hand root and Wrist joint, with the Wrist written in *wrist_frame*."""
+    rng = np.random.default_rng(3)
+    pos = rng.normal(0.0, 0.3, (n, 3))
+    quat = rng.normal(size=(n, 4))
+    quat /= np.linalg.norm(quat, axis=1, keepdims=True)
+    if wrist_frame == "global":
+        wrist_pos, wrist_quat = pos, quat
+    elif wrist_frame == "tracking_space":  # also negates the whole quaternion (same rotation)
+        wrist_pos, wrist_quat = pos * [1, 1, -1], quat * [1, 1, -1, -1]
+    elif wrist_frame == "neither":
+        wrist_pos, wrist_quat = pos + 0.05, quat
+    else:  # "no usable rows": positions all zero
+        pos, wrist_pos, wrist_quat = pos * 0, pos * 0, quat
+    data = {}
+    for i, c in enumerate(("px", "py", "pz", "qx", "qy", "qz", "qw")):
+        data[f"LeftHand_Root_{c}"] = np.hstack([pos, quat])[:, i]
+    for i, c in enumerate(("x", "y", "z", "qx", "qy", "qz", "qw")):
+        data[f"Left_XRHand_Wrist_{c}"] = np.hstack([wrist_pos, wrist_quat])[:, i]
+    return pd.DataFrame(data)
 
 
 def _prepared_head_df() -> pd.DataFrame:
@@ -131,3 +165,42 @@ class TestGenerateChannelsTsv:
         misc_rows = result[result["type"] == "MISC"]
         if len(misc_rows) > 0:
             assert (misc_rows["reference_frame"] == "n/a").all()
+
+
+# ===========================================================================
+# detect_hand_joint_frames and the joint channels' reference_frame
+# ===========================================================================
+
+
+class TestHandJointFrames:
+    @pytest.mark.parametrize("frame", ["global", "tracking_space"])
+    def test_detects_frame_of_wrist_joint(self, frame):
+        """Wrist equal to the root -> global; z and quaternion x, y negated -> tracking_space."""
+        assert detect_hand_joint_frames(_left_hand_df(frame)) == {"Left": frame}
+
+    @pytest.mark.parametrize("case", ["neither", "no usable rows"])
+    def test_unknown_frame_is_na_with_warning(self, case, caplog):
+        """No matching rule, or no usable rows -> n/a and a warning naming session and hand."""
+        assert detect_hand_joint_frames(_left_hand_df(case), "sess_x") == {"Left": "n/a"}
+        assert "Session 'sess_x': Left hand joint frame unknown" in caplog.text
+
+    def test_joint_channels_get_detected_frame(self):
+        """Only XRHand joint POS/ORNT channels take the detected frame; the root stays global."""
+        result = generate_channels_tsv(_left_hand_df("global"), 90.0, {"Left": "tracking_space"})
+        frames = dict(zip(result["name"], result["reference_frame"], strict=True))
+        assert frames["Left_XRHand_Wrist_z"] == "tracking_space"
+        assert frames["Left_XRHand_Wrist_qw"] == "tracking_space"
+        assert frames["LeftHand_Root_pz"] == "global"
+
+    def test_museum_demo_joints_are_in_tracking_space(self):
+        """Both hands' joints in the Museum demo session are in tracking space."""
+        if not _MUSEUM_CSV.exists():
+            pytest.skip(f"Museum demo CSV not found: {_MUSEUM_CSV}")
+        with _MUSEUM_CSV.open("rb") as f:
+            if f.read(8) == b"version ":  # Git LFS pointer (checkout without LFS, as in CI)
+                pytest.skip(f"Museum demo CSV is a Git LFS pointer: {_MUSEUM_CSV}")
+        data = load_continuous_data(_MUSEUM_CSV)
+        assert detect_hand_joint_frames(data) == {
+            "Left": "tracking_space",
+            "Right": "tracking_space",
+        }
