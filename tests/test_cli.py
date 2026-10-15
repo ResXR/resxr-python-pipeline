@@ -8,6 +8,15 @@ import pytest
 import yaml
 
 from resxr.cli import build_parser, main
+from resxr.core.config import PipelineConfig
+from resxr.core.exceptions import ConfigurationError
+from resxr.pipeline import validate_config
+
+_MASKING_NOT_ENABLED = (
+    "preprocessing.masking_checks names check(s) {names} that are not in "
+    "validation.enabled_checks; they never run, so nothing would be masked for them. "
+    "Add them to enabled_checks or remove them from masking_checks."
+)
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -108,6 +117,18 @@ class TestMainDryRun:
         )
         assert "hands_tracking_loss" in caplog.text  # the valid names are listed
 
+    def test_dry_run_rejects_a_masking_check_that_is_not_enabled(
+        self, tmp_path, minimal_config_dict, caplog
+    ):
+        minimal_config_dict["preprocessing"].update(
+            apply_quality_masking=True, masking_checks=["eyes_closed"]
+        )
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert "Configuration error: " in caplog.text
+        assert _MASKING_NOT_ENABLED.format(names="['eyes_closed']") in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # main() — configuration errors stop the run before any session
@@ -142,6 +163,12 @@ class TestMainConfigErrors:
                 lambda cfg: cfg["sampling_frequencies"].update(Hands=0.0),
                 "sampling_frequencies must be positive; got {'Hands': 0.0}",
             ),
+            (
+                lambda cfg: cfg["preprocessing"].update(
+                    apply_quality_masking=True, masking_checks=["hands_tracking_loss"]
+                ),
+                _MASKING_NOT_ENABLED.format(names="['hands_tracking_loss']"),
+            ),
         ],
     )
     def test_config_error_exits_1_before_processing(
@@ -156,3 +183,54 @@ class TestMainConfigErrors:
         assert f"Configuration error in {path}: " in caplog.text
         assert message in caplog.text
         assert not (tmp_path / "out").exists()
+
+
+# ---------------------------------------------------------------------------
+# pipeline.validate_config — masking checks that never run
+# ---------------------------------------------------------------------------
+
+
+class TestMaskingChecksMustBeEnabled:
+    """With masking on, every masking_checks name must also be an enabled check."""
+
+    @staticmethod
+    def _config(minimal_config_dict, *, masking: bool, masking_checks) -> PipelineConfig:
+        minimal_config_dict["validation"]["enabled_checks"] = ["sampling_rate", "eyes_closed"]
+        minimal_config_dict["preprocessing"].update(
+            apply_quality_masking=masking, masking_checks=masking_checks
+        )
+        return PipelineConfig.model_validate(minimal_config_dict)
+
+    def test_masking_on_with_a_check_not_enabled_is_an_error(self, minimal_config_dict):
+        config = self._config(
+            minimal_config_dict, masking=True, masking_checks=["eyes_closed", "hands_tracking_loss"]
+        )
+        with pytest.raises(ConfigurationError) as excinfo:
+            validate_config(config)
+        assert str(excinfo.value) == _MASKING_NOT_ENABLED.format(names="['hands_tracking_loss']")
+
+    def test_masking_off_with_the_same_lists_is_accepted(self, minimal_config_dict):
+        config = self._config(
+            minimal_config_dict,
+            masking=False,
+            masking_checks=["eyes_closed", "hands_tracking_loss"],
+        )
+        validate_config(config)
+
+    @pytest.mark.parametrize("masking_checks", [["eyes_closed", "sampling_rate"], None, []])
+    def test_masking_on_with_every_name_enabled_is_accepted(
+        self, minimal_config_dict, masking_checks
+    ):
+        config = self._config(minimal_config_dict, masking=True, masking_checks=masking_checks)
+        validate_config(config)
+
+    def test_an_unknown_name_is_reported_once(self, minimal_config_dict):
+        config = self._config(
+            minimal_config_dict, masking=True, masking_checks=["eye_closed", "stats_summary"]
+        )
+        with pytest.raises(ConfigurationError) as excinfo:
+            validate_config(config)
+        message = str(excinfo.value)
+        assert "preprocessing.masking_checks names unknown check(s) ['eye_closed']" in message
+        assert _MASKING_NOT_ENABLED.format(names="['stats_summary']") in message
+        assert message.count("eye_closed'") == 1

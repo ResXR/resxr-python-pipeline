@@ -63,8 +63,9 @@ def validate_config(config: PipelineConfig) -> None:
     registered check has (in ``validation.enabled_checks`` or
     ``preprocessing.masking_checks``), tracking-system names that do not exist
     (keys of ``systems``, ``sampling_frequencies`` and
-    ``preprocessing.alternate_time_columns``), and sampling rates that are not
-    positive.
+    ``preprocessing.alternate_time_columns``), sampling rates that are not
+    positive, and, when ``preprocessing.apply_quality_masking`` is true,
+    ``masking_checks`` names that are not in ``validation.enabled_checks``.
     """
     problems = []
     known_checks = check_registry.available_checks
@@ -94,6 +95,20 @@ def validate_config(config: PipelineConfig) -> None:
     not_positive = {name: rate for name, rate in config.sampling_frequencies.items() if rate <= 0}
     if not_positive:
         problems.append(f"sampling_frequencies must be positive; got {not_positive}")
+
+    if config.preprocessing.apply_quality_masking and config.preprocessing.masking_checks:
+        enabled = set(config.validation.enabled_checks)
+        not_enabled = [  # unknown names are reported above
+            name
+            for name in dict.fromkeys(config.preprocessing.masking_checks)
+            if name in known_checks and name not in enabled
+        ]
+        if not_enabled:
+            problems.append(
+                f"preprocessing.masking_checks names check(s) {not_enabled} that are not in "
+                "validation.enabled_checks; they never run, so nothing would be masked for "
+                "them. Add them to enabled_checks or remove them from masking_checks."
+            )
 
     if problems:
         raise ConfigurationError("; ".join(problems))
