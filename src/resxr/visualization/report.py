@@ -211,6 +211,7 @@ class ReportGenerator:
                 continue
             if GLOBAL_CLOCK_COLUMN not in stream.data.columns:
                 logger.warning(
+                    f"Session '{session.session_id}': "
                     f"{stream.system.value}: missing timeSinceStartup column, "
                     "cannot compute global onset for this stream"
                 )
@@ -220,7 +221,10 @@ class ReportGenerator:
                 onsets.append(onset)
 
         if not onsets:
-            logger.warning("No global onset found from timeSinceStartup across any stream")
+            logger.warning(
+                f"Session '{session.session_id}': no global onset found from timeSinceStartup "
+                "across any stream; report times are relative to 0"
+            )
             global_onset = 0.0
         else:
             global_onset = min(onsets)

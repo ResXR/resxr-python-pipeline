@@ -113,6 +113,17 @@ class TestReportGenerator:
         assert "<th>Hand joint frame</th>" in content
         assert "<td>Left tracking_space, Right global</td>" in content
 
+    def test_onset_warnings_name_the_session(self, generator, caplog):
+        stream = _head_stream()
+        stream.data = stream.data.drop(columns="timeSinceStartup")
+        session = _minimal_session({TrackingSystem.HEAD: stream})
+        generator.generate(session)
+        assert (
+            "Session 'report_test_001': Head: missing timeSinceStartup column, cannot compute "
+            "global onset for this stream"
+        ) in caplog.text
+        assert "Session 'report_test_001': no global onset found" in caplog.text
+
     def test_generate_lists_checks_not_run(self, generator):
         session = _minimal_session()
         before = generator.generate(session).read_text(encoding="utf-8")
