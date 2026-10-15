@@ -15,6 +15,7 @@ from ...core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ...io.column_maps import get_hand_measurement_columns
+from ...utils import preview
 from ..registry import register_check
 
 logger = get_logger(__name__)
@@ -32,32 +33,23 @@ def read_tracking_flag(values: pd.Series) -> tuple[pd.Series | None, list[str]]:
     column the check cannot read.
     """
     present = values.dropna()
-    if pd.api.types.is_numeric_dtype(values) or pd.api.types.is_bool_dtype(values):
+    if pd.api.types.is_numeric_dtype(values):  # includes bool
         unexpected = [str(v) for v in pd.unique(present) if v not in (0, 1)]
         return (None, unexpected) if unexpected else (values, [])
 
-    mapping: dict = {}
+    mapping: dict = {}  # text column: each distinct value -> 1.0, 0.0 or NaN
     unexpected = []
     for value in pd.unique(present):
-        if isinstance(value, (bool, np.bool_)) or (
-            isinstance(value, (int, float, np.integer, np.floating)) and value in (0, 1)
-        ):
-            mapping[value] = float(value)
-        elif isinstance(value, str) and value.strip().lower() in _FLAG_TOKENS:
-            mapping[value] = _FLAG_TOKENS[value.strip().lower()]
-        elif isinstance(value, str) and not value.strip():
+        token = str(value).strip().lower()
+        if token in _FLAG_TOKENS:
+            mapping[value] = _FLAG_TOKENS[token]
+        elif not token:
             mapping[value] = np.nan
         else:
             unexpected.append(str(value))
     if unexpected:
         return None, unexpected
     return values.map(mapping).astype(float), []
-
-
-def _shown(values: list[str], limit: int = 10) -> str:
-    """Up to *limit* values, comma-separated, with the number left out."""
-    text = ", ".join(values[:limit])
-    return text + (f", ... ({len(values) - limit} more)" if len(values) > limit else "")
 
 
 class HandsTrackingLossCheck:
@@ -129,13 +121,13 @@ class HandsTrackingLossCheck:
                     logger.warning(
                         f"Session '{session.session_id}': hands_tracking_loss not run for "
                         f"{hand}: column {column} holds values other than 0/1, true/false "
-                        f"or blank ({_shown(unexpected)}); no hand-loss flags from this column"
+                        f"or blank ({preview(unexpected)}); no hand-loss flags from this column"
                     )
                     session.record_check_not_run(
                         self.name,
                         stream.system.value,
                         f"{hand}: column {column} holds values other than 0/1, true/false "
-                        f"or blank ({_shown(unexpected)})",
+                        f"or blank ({preview(unexpected)})",
                     )
                     continue
                 tracking_lost = (tracked == 0) | (tracked.isna())

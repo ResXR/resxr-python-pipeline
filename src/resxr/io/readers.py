@@ -343,7 +343,7 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
         )
 
     session_id = data.get("session_id")
-    if session_id is None or session_id == "":  # missing, null or empty
+    if session_id in (None, ""):  # missing, null or empty
         logger.warning(
             f"{json_path} has no session_id; using 'unknown': custom tables are read only from "
             "a folder named 'unknown_CustomTables' and the report is named unknown_report.html. "
@@ -543,7 +543,7 @@ def _report_missing_events(session_dir: Path, pattern: str, has_custom_tables: b
     if similar:
         logger.warning(
             f"No events file matching '{pattern}' in {session_dir}; {similar} not read (rename "
-            f"it or set input.events_data_pattern). {consequence[0].upper()}{consequence[1:]}."
+            f"it or set input.events_data_pattern). {consequence.capitalize()}."
         )
     else:
         logger.info(f"No events file matching '{pattern}' in {session_dir}; {consequence}.")

@@ -61,7 +61,6 @@ class CheckRegistry:
 
     def __init__(self):
         self._checks: dict[str, ValidationCheck] = {}
-        self._failed_checks: list[tuple[str, str, str]] = []
 
     def register(self, check: ValidationCheck) -> None:
         """
@@ -172,7 +171,6 @@ class CheckRegistry:
                     stream.system.value,
                     e,
                 )
-                self._failed_checks.append((check.name, stream.system.value, str(e)))
                 session.record_check_not_run(check.name, stream.system.value, f"failed: {e}")
 
         return flags
@@ -190,15 +188,6 @@ class CheckRegistry:
             declared = getattr(check, "settings_keys", ())
             keys.update([declared] if isinstance(declared, str) else declared)
         return sorted(keys)
-
-    @property
-    def failed_checks(self) -> list[tuple[str, str, str]]:
-        """List of (check_name, system, error) for checks that raised."""
-        return list(self._failed_checks)
-
-    def clear_failed_checks(self) -> None:
-        """Reset the failed-checks list. Call between sessions in batch runs."""
-        self._failed_checks.clear()
 
 
 # Global registry instance

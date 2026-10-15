@@ -25,9 +25,19 @@ from ..core.constants import GLOBAL_CLOCK_COLUMN, SYSTEM_COLUMN_PREFIXES, Tracki
 from ..core.exceptions import ConfigurationError
 from ..core.logger import get_logger
 from ..core.session import Session, SessionMetadata, TrackingStream
+from ..utils import preview
 from .column_maps import get_columns_for_system
 
 logger = get_logger(__name__)
+
+# The metadata flag that says whether a tracking system was recorded (Head has none)
+_ENABLED_KEYS = {
+    TrackingSystem.EYES: "eyes_enabled",
+    TrackingSystem.HANDS: "hands_enabled",
+    TrackingSystem.FACE: "face_enabled",
+    TrackingSystem.BODY: "body_enabled",
+    TrackingSystem.CONTROLLERS: "controllers_enabled",
+}
 
 
 def is_system_enabled(system: TrackingSystem, metadata: SessionMetadata) -> bool:
@@ -46,28 +56,8 @@ def is_system_enabled(system: TrackingSystem, metadata: SessionMetadata) -> bool
     bool
         True if system was enabled
     """
-    # Head is always present
-    if system == TrackingSystem.HEAD:
-        return True
-
-    mapping = {
-        TrackingSystem.EYES: metadata.eyes_enabled,
-        TrackingSystem.HANDS: metadata.hands_enabled,
-        TrackingSystem.FACE: metadata.face_enabled,
-        TrackingSystem.BODY: metadata.body_enabled,
-        TrackingSystem.CONTROLLERS: metadata.controllers_enabled,
-    }
-
-    return mapping.get(system, True)
-
-
-_ENABLED_KEYS = {
-    TrackingSystem.EYES: "eyes_enabled",
-    TrackingSystem.HANDS: "hands_enabled",
-    TrackingSystem.FACE: "face_enabled",
-    TrackingSystem.BODY: "body_enabled",
-    TrackingSystem.CONTROLLERS: "controllers_enabled",
-}
+    key = _ENABLED_KEYS.get(system)  # Head has no flag: always present
+    return True if key is None else getattr(metadata, key)
 
 
 def systems_off_on_purpose(
@@ -87,7 +77,9 @@ def systems_off_on_purpose(
     }
 
 
-def _log_not_enabled_in_metadata(session: Session, system: TrackingSystem, data: str) -> None:
+def _log_not_enabled_in_metadata(
+    session: Session, system: TrackingSystem, consequence: str
+) -> None:
     """Explain a stream with data that the metadata does not enable.
 
     WARNING when the flag was missing or not true/false (a departure from the
@@ -98,19 +90,13 @@ def _log_not_enabled_in_metadata(session: Session, system: TrackingSystem, data:
     if problem:
         logger.warning(
             f"Session '{session.session_id}': {system.value} not exported: metadata does not "
-            f"mark it enabled ({problem}); {data}"
+            f"mark it enabled ({problem}); {consequence}"
         )
     else:
         logger.info(
             f"Session '{session.session_id}': {system.value} not exported: {key} is false in "
-            f"the metadata; {data}"
+            f"the metadata; {consequence}"
         )
-
-
-def _names(columns: list[str], limit: int = 10) -> str:
-    """Up to *limit* column names, comma-separated, with the number left out."""
-    text = ", ".join(columns[:limit])
-    return text + (f", ... ({len(columns) - limit} more)" if len(columns) > limit else "")
 
 
 def _report_unrouted_columns(
@@ -144,11 +130,11 @@ def _report_unrouted_columns(
     if unknown or face:
         parts = []
         if unknown:
-            parts.append(f"{len(unknown)} match no tracking-system prefix ({_names(unknown)})")
+            parts.append(f"{len(unknown)} match no tracking-system prefix ({preview(unknown)})")
         if face:
             parts.append(
                 f"{len(face)} have a Face prefix, but Face is read only from the face file "
-                f"({_names(face)})"
+                f"({preview(face)})"
             )
         logger.warning(
             f"Session '{sid}': {len(unknown) + len(face)} column(s) of the continuous data are "
@@ -157,7 +143,7 @@ def _report_unrouted_columns(
     if custom:
         logger.info(
             f"Session '{sid}': {len(custom)} Custom_ column(s) (custom transforms) are not "
-            f"exported to BIDS motion files; they stay in sourcedata/ ({_names(custom)})"
+            f"exported to BIDS motion files; they stay in sourcedata/ ({preview(custom)})"
         )
 
 
@@ -292,62 +278,52 @@ def split_continuous_data(
 
     _report_unrouted_columns(sid, all_columns, alternate_time_columns)
 
-    # Handle Face data from separate file
+    # Face comes from its own file
+    face = session.raw_face_data
     face_in_config = enabled_systems is None or enabled_systems.get("Face", True)
-    if session.raw_face_data is not None and not face_in_config:
-        logger.info(
-            f"Session '{sid}': Face not exported: disabled in the config "
-            "(systems.Face.enabled); the face file stays only in sourcedata/"
-        )
-    elif session.raw_face_data is not None and not session.metadata.face_enabled:
-        _log_not_enabled_in_metadata(
-            session, TrackingSystem.FACE, "the face file stays only in sourcedata/"
-        )
-    elif session.raw_face_data is None and face_in_config and session.metadata.face_enabled:
+    if not face_in_config:
+        if face is not None:
+            logger.info(
+                f"Session '{sid}': Face not exported: disabled in the config "
+                "(systems.Face.enabled); the face file stays only in sourcedata/"
+            )
+    elif not session.metadata.face_enabled:
+        if face is not None:
+            _log_not_enabled_in_metadata(
+                session, TrackingSystem.FACE, "the face file stays only in sourcedata/"
+            )
+    elif face is None:
         logger.warning(
             f"Session '{sid}': Face not exported: face_enabled is true but no face file was "
             "loaded (none matches input.face_data_pattern, or it could not be read); the "
             "eyes_closed check needs the Face stream and will not run"
         )
-    elif session.raw_face_data is not None and session.raw_face_data.empty and face_in_config:
+    elif face.empty:
         logger.warning(f"Session '{sid}': Face not exported: the face file has no data rows")
+    else:
+        face_df = face.copy()
+        clock = (alternate_time_columns or {}).get("Face")
+        if clock and clock not in face_df.columns:
+            _warn_clock_column_missing(sid, "Face", clock, "face file")
+        if clock and clock in face_df.columns:
+            if "timestamp" in face_df.columns:
+                face_df = face_df.rename(columns={"timestamp": GLOBAL_CLOCK_COLUMN})
+            face_df = face_df.rename(columns={clock: "timestamp"})
+            logger.debug(f"Using {clock} as timestamp for Face")
 
-    if (
-        session.raw_face_data is not None
-        and (enabled_systems is None or enabled_systems.get("Face", True))
-        and session.metadata.face_enabled
-    ):
-        face_df = session.raw_face_data.copy()
+        data_cols = [c for c in face_df.columns if c not in ("timestamp", GLOBAL_CLOCK_COLUMN)]
 
-        if not face_df.empty:
-            # Use alternate time column if configured
-            if alternate_time_columns:
-                alt_time_col = alternate_time_columns.get("Face")
-                if alt_time_col and alt_time_col not in face_df.columns:
-                    _warn_clock_column_missing(sid, "Face", alt_time_col, "face file")
-                if alt_time_col and alt_time_col in face_df.columns:
-                    if "timestamp" in face_df.columns:
-                        face_df = face_df.rename(columns={"timestamp": GLOBAL_CLOCK_COLUMN})
-                    face_df = face_df.rename(columns={alt_time_col: "timestamp"})
-                    logger.debug(f"Using {alt_time_col} as timestamp for Face")
-
-            data_cols = [c for c in face_df.columns if c not in ("timestamp", GLOBAL_CLOCK_COLUMN)]
-
-            # Get sampling frequency from config
-            if "Face" not in sampling_frequencies:
-                raise ConfigurationError(
-                    "Face tracking is enabled but has no entry in sampling_frequencies. "
-                    "Add it to config/pipeline_config.yaml."
-                )
-            sampling_freq = sampling_frequencies["Face"]
-
-            stream = TrackingStream(
-                system=TrackingSystem.FACE,
-                data=face_df,
-                channel_count=len(data_cols),
-                sampling_frequency=sampling_freq,
+        if "Face" not in sampling_frequencies:
+            raise ConfigurationError(
+                "Face tracking is enabled but has no entry in sampling_frequencies. "
+                "Add it to config/pipeline_config.yaml."
             )
-            streams[TrackingSystem.FACE] = stream
-            logger.info(f"Added Face: {len(face_df)} rows, {len(data_cols)} channels")
+        streams[TrackingSystem.FACE] = TrackingStream(
+            system=TrackingSystem.FACE,
+            data=face_df,
+            channel_count=len(data_cols),
+            sampling_frequency=sampling_frequencies["Face"],
+        )
+        logger.info(f"Added Face: {len(face_df)} rows, {len(data_cols)} channels")
 
     return streams

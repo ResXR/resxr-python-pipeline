@@ -60,16 +60,10 @@ logger = get_logger(__name__)
 def validate_config(config: PipelineConfig) -> None:
     """Reject settings that would otherwise be ignored without a message.
 
-    Raises ConfigurationError naming every problem found: check names that no
-    registered check has (in ``validation.enabled_checks`` or
-    ``preprocessing.masking_checks``), tracking-system names that do not exist
-    (keys of ``systems``, ``sampling_frequencies``, ``system_descriptions`` and
-    ``preprocessing.alternate_time_columns``), sampling rates that are not
-    positive, keys under ``validation.settings`` that no registered check
-    declares in its ``settings_keys`` (``check_column_groups`` is read by
-    ``ValidationConfig.get_column_groups``), and, when
-    ``preprocessing.apply_quality_masking`` is true, ``masking_checks`` names
-    that are not in ``validation.enabled_checks``.
+    Raises ConfigurationError naming every problem found: unknown check names,
+    unknown tracking-system names, sampling rates that are not positive,
+    ``validation.settings`` keys that no registered check declares, and, with
+    masking on, ``masking_checks`` names that are not enabled checks.
     """
     problems = []
     known_checks = check_registry.available_checks
@@ -145,7 +139,6 @@ class SessionOutcome:
 class RunResult:
     """Outcome of :func:`run`: one entry per session found."""
 
-    output_dir: Path
     sessions: list[SessionOutcome] = field(default_factory=list)
 
     @property
@@ -239,13 +232,11 @@ class _SessionOutputs:
                         f"the skipped session {source_dir}; remove it or rerun."
                     )
                 kept.append(target)
-            elif target.exists():
-                action = shutil.rmtree if target.is_dir() else Path.unlink
-                if self._remove(target, action):
-                    removed.append(target)
+            elif target.exists() and self._remove(target):
+                removed.append(target)
         above = [p for p, existed in self.existed.items() if not existed and p not in self.targets]
         for folder in sorted(above, key=lambda p: len(p.parts), reverse=True):
-            if folder.is_dir() and not any(folder.iterdir()) and self._remove(folder, Path.rmdir):
+            if folder.is_dir() and not any(folder.iterdir()) and self._remove(folder):
                 removed.append(folder)
         shown = [p for p in removed if not any(q in p.parents for q in removed)]
         if shown:
@@ -255,18 +246,22 @@ class _SessionOutputs:
     def _deletable(self, path: Path) -> bool:
         p = path.resolve()
         inside_output = any(root in p.parents for root in self.roots)
-        input_data = p == self.data_dir or p in self.data_dir.parents
-        input_data = input_data or any(
-            p == d or d in p.parents or p in d.parents for d in self.source_dirs
+        holds_input = (
+            p == self.data_dir
+            or p in self.data_dir.parents
+            or any(p == d or d in p.parents or p in d.parents for d in self.source_dirs)
         )
-        return inside_output and not input_data
+        return inside_output and not holds_input
 
-    def _remove(self, path: Path, action) -> bool:
+    def _remove(self, path: Path) -> bool:
         if not self._deletable(path):
             logger.warning(f"Not removed: {path} is outside the output folders or holds input data")
             return False
         try:
-            action(path)
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
         except OSError as e:
             logger.warning(f"Could not remove {path} of a skipped session: {e}")
             return False
@@ -336,7 +331,7 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
         if not mappings:
             _log_no_sessions_found(config)
 
-    result = RunResult(output_dir=config.output.bids_root)
+    result = RunResult()
     processed_subjects = []
     resxr_logger = logging.getLogger("resxr")
     source_dirs = [_source_dir(mapping, config) for mapping in mappings]
@@ -529,7 +524,6 @@ def process_session_from_mapping(
         frames = ", ".join(f"{side} {frame}" for side, frame in session.hand_joint_frames.items())
         logger.info(f"Hand joint frame in {session.session_id}: {frames}")
 
-    check_registry.clear_failed_checks()
     for system, stream in session.streams.items():
         logger.info(f"Validating {system.value}")
         flags = check_registry.run_all(stream, session, config.validation)
