@@ -275,6 +275,27 @@ class TestDroppedStreamsAreReported:
             "is timed by timeSinceStartup alone"
         ) in caplog.text
 
+    def test_continuous_data_without_head_columns_warns(
+        self, session_metadata, continuous_df, caplog
+    ):
+        head = [c for c in continuous_df.columns if c.startswith("Node_Head_")]
+        result = self._split(
+            _make_session(session_metadata, continuous_df.drop(columns=head)), caplog
+        )
+        assert TrackingSystem.HEAD not in result
+        assert (
+            "Session 'test': no Head columns found in the continuous data; Head not exported"
+        ) in caplog.text
+
+    def test_face_file_without_rows_warns(self, session_metadata, continuous_df, caplog):
+        from tests.conftest import _face_df
+
+        session = _make_session(session_metadata, continuous_df)
+        session.raw_face_data = _face_df().iloc[:0]
+        result = self._split(session, caplog)
+        assert TrackingSystem.FACE not in result
+        assert "Session 'test': Face not exported: the face file has no data rows" in caplog.text
+
     def test_valid_session_has_no_warning(self, session_metadata, continuous_df, caplog):
         from tests.conftest import _face_df
 
