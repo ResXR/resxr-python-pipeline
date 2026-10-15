@@ -729,6 +729,43 @@ class TestClockDepartures:
         path, _ = self._load(tmp_path, clock, caplog)
         assert f"{path}: 3 row(s) have no timeSinceStartup value (empty or NaN)" in caplog.text
 
+    @pytest.mark.parametrize("loader", [load_continuous_data, load_face_data])
+    def test_gaps_are_reported_at_info_and_rows_kept(self, tmp_path, caplog, loader):
+        import logging
+
+        import numpy as np
+
+        clock = 1.0 + np.arange(50) / 72.0  # median step 1/72 s = 0.0139 s
+        clock[11:] += 0.3  # a 0.31 s step after row 10
+        clock[31:] += 0.5  # a 0.51 s step after row 30, at 1.0 + 30/72 + 0.3 = 1.72
+        clock = np.r_[0.0, clock, 0.0]  # zero rows (before onset, after offset) are ignored
+        path = tmp_path / "x_ContinuousData.csv"
+        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": 0.0}).to_csv(path, index=False)
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            df = loader(path)
+        (record,) = [r for r in caplog.records if "gap(s)" in r.getMessage()]
+        assert record.levelname == "INFO"
+        assert record.getMessage() == (
+            f"{path}: timeSinceStartup has 2 gap(s) longer than 10 times the median step "
+            "(0.0139 s); the longest is 0.51 s, after timeSinceStartup 1.72. "
+            "Rows are not interpolated."
+        )
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_a_regular_clock_has_no_gap_line(self, tmp_path, caplog):
+        import logging
+
+        import numpy as np
+
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[25:] += 0.5 / 72.0  # one step 1.5 times the median is not a gap
+        path = tmp_path / "x_ContinuousData.csv"
+        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": 0.0}).to_csv(path, index=False)
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            load_continuous_data(path)
+        assert "gap(s)" not in caplog.text
+
     def test_semicolon_file_names_the_expected_format(self, tmp_path):
         path = tmp_path / "x_ContinuousData.csv"
         path.write_text("timeSinceStartup;Node_Head_px\n1.0;0.1\n1.1;0.2\n", encoding="utf-8")

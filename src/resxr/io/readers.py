@@ -25,6 +25,8 @@ logger = get_logger(__name__)
 
 # A median timeSinceStartup step above this many seconds suggests milliseconds.
 _CLOCK_STEP_LOOKS_LIKE_MS = 0.5
+# A timeSinceStartup step longer than this many median steps is reported as a gap.
+_CLOCK_GAP_MEDIAN_STEPS = 10
 
 
 def check_clock(values: pd.Series, source: Path) -> None:
@@ -32,9 +34,10 @@ def check_clock(values: pd.Series, source: Path) -> None:
 
     The column must be in seconds, never step backward and have a value in every
     row. Leading and trailing zero rows are allowed (before onset and after
-    offset) and are ignored here. Nothing is changed: the pipeline does not
-    sort rows or convert units. A non-numeric column is left to the stream
-    check, which skips the session.
+    offset) and are ignored here. Steps longer than 10 times the median step
+    are reported at INFO, since valid recordings can have them. Nothing is
+    changed: the pipeline does not sort rows, convert units or interpolate. A
+    non-numeric column is left to the stream check, which skips the session.
     """
     if not pd.api.types.is_numeric_dtype(values):
         return
@@ -64,6 +67,16 @@ def check_clock(values: pd.Series, source: Path) -> None:
             "as seconds and not converted: if it holds milliseconds, latencies, flag times and "
             "event onsets will be wrong. Write it in seconds"
         )
+    if median_step > 0:
+        gaps = np.flatnonzero(steps > _CLOCK_GAP_MEDIAN_STEPS * median_step)
+        if gaps.size:
+            longest = gaps[np.argmax(steps[gaps])]
+            logger.info(
+                f"{source}: {GLOBAL_CLOCK_COLUMN} has {gaps.size} gap(s) longer than "
+                f"{_CLOCK_GAP_MEDIAN_STEPS} times the median step ({median_step:.4f} s); the "
+                f"longest is {steps[longest]:.2f} s, after {GLOBAL_CLOCK_COLUMN} "
+                f"{valid[longest]:.2f}. Rows are not interpolated."
+            )
 
 
 def load_continuous_data(csv_path: Path) -> pd.DataFrame:
