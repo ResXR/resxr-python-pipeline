@@ -166,6 +166,18 @@ class TestMainDryRun:
             in caplog.text
         )
 
+    def test_dry_run_rejects_an_unknown_system_in_system_descriptions(
+        self, tmp_path, minimal_config_dict, caplog
+    ):
+        minimal_config_dict["system_descriptions"]["Hand"] = "Hand tracking"
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert (
+            "Configuration error: system_descriptions names unknown tracking system(s) "
+            "['Hand']; valid names: ['Head', 'Hands', 'Eyes', 'Face', 'Body', 'Controllers']"
+        ) in caplog.text
+
 
 # ---------------------------------------------------------------------------
 # main() — configuration errors stop the run before any session
@@ -189,6 +201,10 @@ class TestMainConfigErrors:
             (
                 lambda cfg: cfg.update(systems={"Hand": {"enabled": False}}),
                 "systems names unknown tracking system(s) ['Hand']",
+            ),
+            (
+                lambda cfg: cfg["system_descriptions"].update(Hand="Hand tracking"),
+                "system_descriptions names unknown tracking system(s) ['Hand']; valid names: ",
             ),
             (
                 lambda cfg: cfg["preprocessing"].update(

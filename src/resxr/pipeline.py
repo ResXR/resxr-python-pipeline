@@ -62,7 +62,7 @@ def validate_config(config: PipelineConfig) -> None:
     Raises ConfigurationError naming every problem found: check names that no
     registered check has (in ``validation.enabled_checks`` or
     ``preprocessing.masking_checks``), tracking-system names that do not exist
-    (keys of ``systems``, ``sampling_frequencies`` and
+    (keys of ``systems``, ``sampling_frequencies``, ``system_descriptions`` and
     ``preprocessing.alternate_time_columns``), sampling rates that are not
     positive, keys under ``validation.settings`` that no registered check
     declares in its ``settings_keys`` (``check_column_groups`` is read by
@@ -87,6 +87,7 @@ def validate_config(config: PipelineConfig) -> None:
     for setting, keys in (
         ("systems", config.systems),
         ("sampling_frequencies", config.sampling_frequencies),
+        ("system_descriptions", config.system_descriptions),
         ("preprocessing.alternate_time_columns", config.preprocessing.alternate_time_columns),
     ):
         unknown = [key for key in keys if key not in system_names]
