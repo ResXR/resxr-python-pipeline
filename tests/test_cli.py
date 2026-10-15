@@ -18,6 +18,20 @@ _MASKING_NOT_ENABLED = (
     "Add them to enabled_checks or remove them from masking_checks."
 )
 
+# Every validation.settings key read in src/ (the shipped checks and get_column_groups)
+_SHIPPED_SETTINGS_KEYS = [
+    "check_column_groups",
+    "eyes_closed_min_duration",
+    "eyes_closed_threshold",
+    "eyes_closed_use_min_duration",
+    "sampling_cv_threshold",
+    "sampling_rate_tolerance",
+    "tracking_flags",
+]
+_UNKNOWN_SETTINGS = (
+    "validation.settings has unknown key(s) {keys}; keys the registered checks read: {known}"
+)
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -139,6 +153,19 @@ class TestMainDryRun:
             caplog.text
         )
 
+    def test_dry_run_rejects_an_unknown_settings_key(self, tmp_path, minimal_config_dict, caplog):
+        minimal_config_dict["validation"]["settings"] = {"sampling_rate_tolerence": 0.2}
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert "Configuration error: " in caplog.text
+        assert (
+            _UNKNOWN_SETTINGS.format(
+                keys="['sampling_rate_tolerence']", known=_SHIPPED_SETTINGS_KEYS
+            )
+            in caplog.text
+        )
+
 
 # ---------------------------------------------------------------------------
 # main() — configuration errors stop the run before any session
@@ -182,6 +209,12 @@ class TestMainConfigErrors:
             (
                 lambda cfg: cfg["preprocessing"].update(apply_quality_maskin=True),
                 "preprocessing.apply_quality_maskin\n  Extra inputs are not permitted",
+            ),
+            (
+                lambda cfg: cfg["validation"].update(settings={"eyes_closed_treshold": 0.8}),
+                _UNKNOWN_SETTINGS.format(
+                    keys="['eyes_closed_treshold']", known=_SHIPPED_SETTINGS_KEYS
+                ),
             ),
             (
                 lambda cfg: cfg.update(outputs={"bids_root": "elsewhere"}),
@@ -252,3 +285,53 @@ class TestMaskingChecksMustBeEnabled:
         assert "preprocessing.masking_checks names unknown check(s) ['eye_closed']" in message
         assert _MASKING_NOT_ENABLED.format(names="['stats_summary']") in message
         assert message.count("eye_closed'") == 1
+
+
+# ---------------------------------------------------------------------------
+# pipeline.validate_config — validation.settings keys must be declared
+# ---------------------------------------------------------------------------
+
+
+class TestSettingsKeysMustBeDeclared:
+    """Every validation.settings key must be declared by a registered check."""
+
+    @staticmethod
+    def _config(minimal_config_dict, settings: dict) -> PipelineConfig:
+        minimal_config_dict["validation"]["settings"] = settings
+        return PipelineConfig.model_validate(minimal_config_dict)
+
+    def test_a_misspelled_key_is_an_error_naming_the_known_keys(self, minimal_config_dict):
+        config = self._config(
+            minimal_config_dict, {"eyes_closed_threshold": 0.8, "trackin_flags": {}}
+        )
+        with pytest.raises(ConfigurationError) as excinfo:
+            validate_config(config)
+        assert str(excinfo.value) == _UNKNOWN_SETTINGS.format(
+            keys="['trackin_flags']", known=_SHIPPED_SETTINGS_KEYS
+        )
+
+    def test_every_key_the_shipped_code_reads_is_accepted(self, minimal_config_dict):
+        validate_config(self._config(minimal_config_dict, dict.fromkeys(_SHIPPED_SETTINGS_KEYS)))
+
+    def test_the_shipped_config_passes_validate_config(self):
+        path = Path(__file__).resolve().parents[1] / "config" / "pipeline_config.yaml"
+        validate_config(PipelineConfig.from_yaml(path))
+
+    @pytest.mark.parametrize("declared", [("my_check_threshold",), "my_check_threshold"])
+    def test_a_custom_check_declares_its_own_key(self, minimal_config_dict, monkeypatch, declared):
+        from resxr.validation import check_registry
+
+        class _MyCheck:
+            name = "_my_custom_check"
+            description = "Reads its own settings key"
+            required_streams = None
+            settings_keys = declared
+
+            def __call__(self, stream, session, config):
+                return []
+
+        config = self._config(minimal_config_dict, {"my_check_threshold": 0.5})
+        with pytest.raises(ConfigurationError, match=r"unknown key\(s\) \['my_check_threshold'\]"):
+            validate_config(config)
+        monkeypatch.setitem(check_registry._checks, _MyCheck.name, _MyCheck())
+        validate_config(config)

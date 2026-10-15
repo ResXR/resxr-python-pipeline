@@ -32,6 +32,11 @@ class EyesClosedCheck:
     # below, so only FACE is required. Listing EYES here would make the registry
     # skip the entire check on sessions without eye tracking.
     required_streams = [TrackingSystem.FACE]
+    settings_keys = (
+        "eyes_closed_threshold",
+        "eyes_closed_min_duration",
+        "eyes_closed_use_min_duration",
+    )
 
     def __call__(
         self,

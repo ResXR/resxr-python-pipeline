@@ -7,7 +7,7 @@ Provides Pydantic models for type-safe configuration and YAML loading.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 from pydantic import (
@@ -28,7 +28,9 @@ class ConfigModel(BaseModel):
 
     Unknown keys are an error at every level, so a misspelled key cannot be
     ignored without a message. Dict fields with free keys (such as
-    ``validation.settings``) are not models and are not affected.
+    ``validation.settings``) are not models and are not affected here;
+    ``pipeline.validate_config`` checks the keys of ``validation.settings``
+    against those the registered checks declare.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -89,6 +91,9 @@ class ColumnGroup(ConfigModel):
 
 class ValidationConfig(ConfigModel):
     """Configuration for quality validation checks."""
+
+    # validation.settings keys read here, for the checks that call get_column_groups
+    SETTINGS_KEYS: ClassVar[tuple[str, ...]] = ("check_column_groups",)
 
     enabled_checks: list[str]
     column_groups: list[ColumnGroup] = Field(default_factory=list)

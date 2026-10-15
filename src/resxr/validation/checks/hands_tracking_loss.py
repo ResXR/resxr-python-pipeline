@@ -72,6 +72,7 @@ class HandsTrackingLossCheck:
     name = "hands_tracking_loss"
     description = "Detects tracking loss for left and right hands using validity flags"
     required_streams = [TrackingSystem.HANDS]
+    settings_keys = ("tracking_flags",)
 
     def __call__(
         self,

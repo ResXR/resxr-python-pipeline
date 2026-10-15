@@ -29,6 +29,7 @@ class SamplingRateCheck:
     name = "sampling_rate"
     description = "Validates sampling frequency consistency"
     required_streams = None
+    settings_keys = ("sampling_rate_tolerance", "sampling_cv_threshold")
 
     def __call__(
         self, stream: TrackingStream, session: Session, config: ValidationConfig

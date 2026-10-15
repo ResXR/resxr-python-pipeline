@@ -33,7 +33,7 @@ from .bids.metadata import (
     generate_motion_json,
     generate_participants_json,
 )
-from .core.config import PipelineConfig, SessionMapping
+from .core.config import PipelineConfig, SessionMapping, ValidationConfig
 from .core.constants import TrackingSystem
 from .core.exceptions import ConfigurationError, DataLoadError, ResXRError
 from .core.logger import get_logger
@@ -64,8 +64,11 @@ def validate_config(config: PipelineConfig) -> None:
     ``preprocessing.masking_checks``), tracking-system names that do not exist
     (keys of ``systems``, ``sampling_frequencies`` and
     ``preprocessing.alternate_time_columns``), sampling rates that are not
-    positive, and, when ``preprocessing.apply_quality_masking`` is true,
-    ``masking_checks`` names that are not in ``validation.enabled_checks``.
+    positive, keys under ``validation.settings`` that no registered check
+    declares in its ``settings_keys`` (``check_column_groups`` is read by
+    ``ValidationConfig.get_column_groups``), and, when
+    ``preprocessing.apply_quality_masking`` is true, ``masking_checks`` names
+    that are not in ``validation.enabled_checks``.
     """
     problems = []
     known_checks = check_registry.available_checks
@@ -95,6 +98,14 @@ def validate_config(config: PipelineConfig) -> None:
     not_positive = {name: rate for name, rate in config.sampling_frequencies.items() if rate <= 0}
     if not_positive:
         problems.append(f"sampling_frequencies must be positive; got {not_positive}")
+
+    known_settings = sorted(set(check_registry.settings_keys) | set(ValidationConfig.SETTINGS_KEYS))
+    unknown_settings = [key for key in config.validation.settings if key not in known_settings]
+    if unknown_settings:
+        problems.append(
+            f"validation.settings has unknown key(s) {unknown_settings}; keys the registered "
+            f"checks read: {known_settings}"
+        )
 
     if config.preprocessing.apply_quality_masking and config.preprocessing.masking_checks:
         enabled = set(config.validation.enabled_checks)

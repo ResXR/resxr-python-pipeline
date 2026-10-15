@@ -49,6 +49,7 @@ class ClockDropoutCheck:
         "Detects per-system clock dropouts (zero timestamps) strictly inside the recording window"
     )
     required_streams = None  # runs independently on every stream
+    settings_keys = ()  # reads no validation.settings key
 
     def __call__(
         self,

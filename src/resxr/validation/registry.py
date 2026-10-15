@@ -31,11 +31,18 @@ class ValidationCheck(Protocol):
         Multi-stream checks will only run once (when processing the first
         stream in the list) and can access other streams via session.get_stream().
         If not set, check runs independently on each stream.
+    settings_keys : tuple[str, ...]
+        The ``validation.settings`` keys this check reads (with
+        ``config.get(key, default)``). A check that reads a settings key must
+        declare it: a key under ``validation.settings`` that no registered check
+        declares is a configuration error. A check without this attribute reads
+        no settings key.
     """
 
     name: str
     description: str
     required_streams: list[TrackingSystem] | None
+    settings_keys: tuple[str, ...] = ()
 
     def __call__(
         self, stream: TrackingStream, session: Session, config: ValidationConfig
@@ -176,6 +183,15 @@ class CheckRegistry:
         return list(self._checks.keys())
 
     @property
+    def settings_keys(self) -> list[str]:
+        """The ``validation.settings`` keys the registered checks declare, sorted."""
+        keys: set[str] = set()
+        for check in self._checks.values():
+            declared = getattr(check, "settings_keys", ())
+            keys.update([declared] if isinstance(declared, str) else declared)
+        return sorted(keys)
+
+    @property
     def failed_checks(self) -> list[tuple[str, str, str]]:
         """List of (check_name, system, error) for checks that raised."""
         return list(self._failed_checks)
@@ -197,6 +213,7 @@ def register_check(check: ValidationCheck) -> ValidationCheck:
         @register_check
         class MyCheck:
             name = "my_check"
+            settings_keys = ("my_check_threshold",)  # validation.settings keys it reads
             ...
     """
     check_registry.register(check)

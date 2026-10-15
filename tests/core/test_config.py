@@ -189,7 +189,7 @@ class TestUnknownKeys:
         ) in message
 
     def test_a_settings_key_is_not_checked_when_loading(self, tmp_path, minimal_config_dict):
-        """validation.settings is a free mapping: loading accepts any key in it."""
+        """Loading accepts any key in validation.settings; validate_config checks the keys."""
         minimal_config_dict["validation"]["settings"] = {"no_check_reads_this": 1}
         config = self._load(tmp_path, minimal_config_dict)
         assert config.validation.settings == {"no_check_reads_this": 1}
