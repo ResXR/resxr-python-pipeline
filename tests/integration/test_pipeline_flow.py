@@ -1192,6 +1192,38 @@ def test_an_expected_stream_that_is_absent_is_a_check_not_run(
     assert "<h2>Checks not run (1)</h2>" in report
 
 
+@pytest.mark.parametrize("session_id", [None, ""], ids=["null", "empty"])
+def test_a_null_or_empty_session_id_is_read_as_unknown(
+    tmp_path, minimal_config_dict, caplog, session_id
+):
+    data_dir = tmp_path / "sessions"
+    session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata["session_id"] = session_id
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    (session_dir / "A_CustomTables").mkdir()
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=[{"source_dir": "sess_a", "subject_id": "01", "session_label": "01"}],
+        report=True,
+    )
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert result.exit_code == 0
+    assert f"{metadata_path} has no session_id; using 'unknown': custom tables are read" in (
+        caplog.text
+    )
+    assert (
+        f"Custom tables folder(s) ['A_CustomTables'] in {session_dir} do not match the expected "
+        "name 'unknown_CustomTables' (from session_id 'unknown')"
+    ) in caplog.text
+    assert (tmp_path / "bids_out" / "sub-01" / "ses-01" / "unknown_report.html").exists()
+
+
 def test_nested_sessions_without_mappings_are_an_error_with_exit_code_1(
     tmp_path, minimal_config_dict, caplog
 ):

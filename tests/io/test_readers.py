@@ -188,8 +188,17 @@ class TestSessionMetadataDepartures:
         )
         assert meta.flag_problems["eyes_enabled"] == f"eyes_enabled is {value!r}, not true or false"
 
-    def test_missing_session_id_warns_with_its_consequences(self, tmp_path, caplog):
-        path, meta = self._load(tmp_path, {"fixedDeltaTime": 0.02}, caplog)
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"fixedDeltaTime": 0.02},
+            {"fixedDeltaTime": 0.02, "session_id": None},
+            {"fixedDeltaTime": 0.02, "session_id": ""},
+        ],
+        ids=["missing", "null", "empty"],
+    )
+    def test_missing_session_id_warns_with_its_consequences(self, tmp_path, caplog, data):
+        path, meta = self._load(tmp_path, data, caplog)
         assert meta.session_id == "unknown"
         assert (
             f"{path} has no session_id; using 'unknown': custom tables are read only from a "

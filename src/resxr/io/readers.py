@@ -327,12 +327,14 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
             "the value is shown only in the report header)"
         )
 
-    if "session_id" not in data:
+    session_id = data.get("session_id")
+    if session_id is None or session_id == "":  # missing, null or empty
         logger.warning(
             f"{json_path} has no session_id; using 'unknown': custom tables are read only from "
             "a folder named 'unknown_CustomTables' and the report is named unknown_report.html. "
             "Add session_id (the prefix of the session's file names)."
         )
+        session_id = "unknown"
 
     flag_problems: dict[str, str] = {}
     flags = {
@@ -347,7 +349,7 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
     }
 
     return SessionMetadata(
-        session_id=data.get("session_id", "unknown"),
+        session_id=session_id,
         utc_start=utc_start,
         device_utc_offset=data.get("device_utc_offset", ""),
         platform=data.get("platform", ""),
