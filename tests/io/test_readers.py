@@ -722,9 +722,15 @@ class TestClockDepartures:
     def test_decimal_comma_file_names_the_expected_format(self, tmp_path):
         path = tmp_path / "x_ContinuousData.csv"
         path.write_text("timeSinceStartup;Node_Head_px\n1,0;0,1\n1,1;0,2;3,4,5\n", encoding="utf-8")
-        with pytest.raises(DataLoadError, match="'.' as the decimal separator") as error:
+        with pytest.raises(DataLoadError) as error:
             load_continuous_data(path)
-        assert chr(10) not in str(error.value)  # pandas ends its message with a newline
+        message = str(error.value)
+        assert message.startswith(f"Failed to load {path}: Error tokenizing data.")  # pandas
+        assert message.endswith(
+            ". Check that the file is comma-separated with '.' as the decimal separator, "
+            "and that every row has the header's number of fields"
+        )
+        assert chr(10) not in message  # pandas ends its message with a newline
 
 
 # ===========================================================================

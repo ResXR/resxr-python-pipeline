@@ -95,8 +95,9 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
         )
     except pd.errors.ParserError as e:
         raise DataLoadError(
-            f"Failed to load {csv_path}: {str(e).strip()}. The file must be comma-separated, "
-            "with '.' as the decimal separator"
+            f"Failed to load {csv_path}: {str(e).strip()}. Check that the file is "
+            "comma-separated with '.' as the decimal separator, and that every row has the "
+            "header's number of fields"
         ) from e
     except Exception as e:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
