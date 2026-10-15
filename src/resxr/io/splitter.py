@@ -70,6 +70,23 @@ _ENABLED_KEYS = {
 }
 
 
+def systems_off_on_purpose(
+    metadata: SessionMetadata, enabled_systems: dict[str, bool] | None
+) -> set[TrackingSystem]:
+    """Tracking systems turned off on purpose.
+
+    That is, disabled in the config (``systems.<name>.enabled: false``) or set to
+    JSON false in the metadata. A missing key or any other value (1/0, a string,
+    null) is not on purpose: that stream was expected.
+    """
+    return {
+        system
+        for system in TrackingSystem
+        if (enabled_systems is not None and not enabled_systems.get(system.value, True))
+        or _ENABLED_KEYS.get(system) in metadata.false_flags
+    }
+
+
 def _log_not_enabled_in_metadata(session: Session, system: TrackingSystem, data: str) -> None:
     """Explain a stream with data that the metadata does not enable.
 

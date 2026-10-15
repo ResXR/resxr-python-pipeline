@@ -125,7 +125,13 @@ class CheckRegistry:
                     missing = [s for s in required_streams if not session.has_stream(s)]
                     if missing:
                         names = ", ".join(s.value for s in missing)
-                        if session.record_check_not_run(
+                        if all(s in session.systems_off for s in missing):
+                            # Off on purpose (config or metadata): not a check not run
+                            logger.debug(
+                                f"Session '{session.session_id}': check '{check.name}' "
+                                f"skipped: {names} turned off in the config or the metadata"
+                            )
+                        elif session.record_check_not_run(
                             check.name, names, f"the session has no {names} stream"
                         ):
                             logger.info(

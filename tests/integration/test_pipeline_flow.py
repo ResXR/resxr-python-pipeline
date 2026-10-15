@@ -122,6 +122,7 @@ def _write_config(
     data_dir: Path,
     bids_root: Path,
     session_mappings: list[dict],
+    report: bool = False,
 ) -> Path:
     cfg = dict(minimal_config_dict)
     cfg["input"] = dict(cfg["input"])
@@ -130,7 +131,7 @@ def _write_config(
 
     cfg["input"]["data_dir"] = str(data_dir)
     cfg["output"]["bids_root"] = str(bids_root)
-    cfg["report"]["enabled"] = False
+    cfg["report"]["enabled"] = report
     cfg["session_mappings"] = session_mappings
 
     config_path = tmp_path / "pipeline_config.yaml"
@@ -1071,6 +1072,124 @@ def test_checks_not_run_appear_in_the_summary(tmp_path, minimal_config_dict, cap
         "checks not run: hands_tracking_loss on Hands: right_hand: column "
         "RightHand_Status_HandTracked missing"
     ) in caplog.text
+
+
+def _run_with_every_stream_check(
+    tmp_path, minimal_config_dict, caplog, *, edit_metadata, face_file=False, systems=None
+):
+    """Run one clocked session with the stream checks enabled and the report on.
+
+    Returns the session's outcome, the run-summary records and the report text.
+    """
+    data_dir = tmp_path / "sessions"
+    session_dir = _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    edit_metadata(metadata)
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    if face_file:
+        pd.DataFrame(
+            {
+                "timeSinceStartup": [1.0, 1.033333, 1.066667],
+                "Eyes_Closed_L": [0.0, 0.0, 0.0],
+                "Eyes_Closed_R": [0.0, 0.0, 0.0],
+            }
+        ).to_csv(session_dir / "A_FaceExpressionData.csv", index=False)
+    minimal_config_dict["validation"]["enabled_checks"] = [
+        "sampling_rate",
+        "stats_summary",
+        "hands_tracking_loss",
+        "eyes_closed",
+    ]
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    if systems:
+        minimal_config_dict["systems"] = systems
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=[{"source_dir": "sess_a", "subject_id": "01", "session_label": "01"}],
+        report=True,
+    )
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    (outcome,) = result.sessions
+    summary = [r for r in caplog.records if r.getMessage().startswith("Run summary:")]
+    report = tmp_path / "bids_out" / "sub-01" / "ses-01" / "A_report.html"
+    return outcome, summary, report.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("edit_metadata", "face_file", "systems", "info_line"),
+    [
+        pytest.param(
+            lambda m: m.update(face_enabled=True),
+            True,
+            {"Face": {"enabled": False}},
+            "Session 'A': Face not exported: disabled in the config (systems.Face.enabled); "
+            "the face file stays only in sourcedata/",
+            id="face_disabled_in_config",
+        ),
+        pytest.param(
+            lambda m: m.update(face_enabled=False), False, None, None, id="face_enabled_false"
+        ),
+        pytest.param(
+            lambda m: m.update(hands_enabled=False),
+            False,
+            None,
+            "Session 'A': Hands not exported: hands_enabled is false in the metadata",
+            id="hands_enabled_false",
+        ),
+    ],
+)
+def test_a_stream_turned_off_on_purpose_is_not_a_check_not_run(
+    tmp_path, minimal_config_dict, caplog, edit_metadata, face_file, systems, info_line
+):
+    outcome, summary, report = _run_with_every_stream_check(
+        tmp_path,
+        minimal_config_dict,
+        caplog,
+        edit_metadata=edit_metadata,
+        face_file=face_file,
+        systems=systems,
+    )
+    assert outcome.processed
+    assert outcome.checks_not_run == []
+    assert [r.levelname for r in summary] == ["INFO"]
+    assert "not run" not in caplog.text
+    assert "Checks not run" not in report
+    if info_line:
+        assert info_line in caplog.text  # the stream's own INFO line stays
+
+
+@pytest.mark.parametrize(
+    "edit_metadata",
+    [
+        pytest.param(lambda m: m.update(face_enabled=True), id="face_enabled_true_no_face_file"),
+        pytest.param(lambda m: m.pop("face_enabled"), id="face_enabled_missing"),
+        pytest.param(lambda m: m.update(face_enabled=0), id="face_enabled_0"),
+        pytest.param(lambda m: m.update(face_enabled="false"), id="face_enabled_string_false"),
+        pytest.param(lambda m: m.update(face_enabled=None), id="face_enabled_null"),
+    ],
+)
+def test_an_expected_stream_that_is_absent_is_a_check_not_run(
+    tmp_path, minimal_config_dict, caplog, edit_metadata
+):
+    outcome, summary, report = _run_with_every_stream_check(
+        tmp_path, minimal_config_dict, caplog, edit_metadata=edit_metadata
+    )
+    assert [(c.check, c.stream, c.reason) for c in outcome.checks_not_run] == [
+        ("eyes_closed", "Face", "the session has no Face stream")
+    ]
+    assert [r.levelname for r in summary] == ["WARNING"]
+    assert "Session 'A': check 'eyes_closed' not run: the session has no Face stream" in (
+        caplog.text
+    )
+    assert "<h2>Checks not run (1)</h2>" in report
 
 
 def test_nested_sessions_without_mappings_are_an_error_with_exit_code_1(

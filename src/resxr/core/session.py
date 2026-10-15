@@ -257,6 +257,9 @@ class SessionMetadata:
     # (key -> reason, e.g. "hands_enabled missing"); used to explain dropped streams.
     flag_problems: dict[str, str] = field(default_factory=dict)
 
+    # Flags written as JSON false in the file: streams turned off on purpose.
+    false_flags: set[str] = field(default_factory=set)
+
     # Number of columns allocated in the CSV schema at session start (a
     # compile-time constant, not a live device measurement). Kept for
     # provenance; surfaced only in sourcedata, not in BIDS sidecars.
@@ -438,6 +441,10 @@ class Session:
 
     # Enabled checks that produced no result for a stream (shown in the report)
     checks_not_run: list[CheckNotRun] = field(default_factory=list)
+
+    # Systems turned off on purpose (disabled in the config, or JSON false in the
+    # metadata); a check that needs one of them is not listed in checks_not_run.
+    systems_off: set[TrackingSystem] = field(default_factory=set)
 
     def record_check_not_run(self, check: str, stream: str, reason: str) -> bool:
         """Record that *check* produced no result for *stream*; False if already recorded."""

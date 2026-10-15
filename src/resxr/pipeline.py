@@ -39,7 +39,7 @@ from .core.exceptions import ConfigurationError, DataLoadError, ResXRError
 from .core.logger import get_logger
 from .core.session import CheckNotRun, Session
 from .io.readers import discover_sessions, load_session
-from .io.splitter import split_continuous_data
+from .io.splitter import split_continuous_data, systems_off_on_purpose
 from .io.writers import (
     copy_sourcedata,
     write_bids_events,
@@ -360,6 +360,7 @@ def process_session_from_mapping(
         alternate_time_columns=config.preprocessing.alternate_time_columns,
     )
     logger.info(f"Split into {len(session.streams)} tracking streams")
+    session.systems_off = systems_off_on_purpose(session.metadata, enabled_systems)
 
     if not session.streams:
         if session.raw_continuous_data is None or session.raw_continuous_data.empty:

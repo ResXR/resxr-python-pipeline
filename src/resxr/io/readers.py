@@ -357,6 +357,7 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
         schema_rev=data.get("schema_rev", ""),
         **flags,
         flag_problems=flag_problems,
+        false_flags={key for key in flags if data.get(key) is False},
         # New schema_* keys; fall back to legacy detected_* names for older sessions.
         schema_hand_bones=data.get("schema_hand_bones", data.get("detected_hand_bones", 0)),
         schema_body_joints=data.get("schema_body_joints", data.get("detected_body_joints", 0)),
