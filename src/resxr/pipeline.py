@@ -247,7 +247,8 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
         write_dataset_files(config, bids, processed_subjects)
 
     log_run_summary(result)
-    logger.info(f"Pipeline complete. Output at: {config.output.bids_root}")
+    if result.processed:
+        logger.info(f"Pipeline complete. Output at: {config.output.bids_root}")
     return result
 
 

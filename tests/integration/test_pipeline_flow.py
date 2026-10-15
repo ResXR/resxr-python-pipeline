@@ -958,6 +958,7 @@ def test_run_returns_every_session_and_exit_code_0_when_all_processed(
     assert [r.levelname for r in summary] == ["INFO"]
     assert summary[0].getMessage() == "Run summary: 2 session(s) found, 2 processed, 0 skipped."
     assert "  processed sess_a (sub-01 ses-01): 0 warning(s), 0 error(s)" in caplog.text
+    assert f"Pipeline complete. Output at: {tmp_path / 'bids_out'}" in caplog.text
     assert main(["-c", str(cfg)]) == 0
 
 
@@ -992,6 +993,7 @@ def test_every_session_failing_gives_an_error_summary_and_exit_code_1(
     assert [r.levelname for r in summary] == ["ERROR"]
     assert "Run summary: 2 session(s) found, 0 processed, 2 skipped." in caplog.text
     assert not (tmp_path / "bids_out" / "dataset_description.json").exists()
+    assert "Pipeline complete" not in caplog.text  # no output was written
 
 
 def _fail_session_a(monkeypatch, error: BaseException) -> None:
@@ -1243,6 +1245,7 @@ def test_nested_sessions_without_mappings_are_an_error_with_exit_code_1(
     assert "1 deeper folder(s) contain one" in caplog.text
     assert str(data_dir / "Project" / "Task" / "sess_a") in caplog.text
     assert "Run summary: 0 session(s) found, 0 processed, 0 skipped." in caplog.text
+    assert "Pipeline complete" not in caplog.text
 
 
 def test_header_only_continuous_file_skips_the_session_with_an_error(
