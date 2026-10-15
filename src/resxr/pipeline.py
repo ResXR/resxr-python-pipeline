@@ -65,7 +65,8 @@ def validate_config(config: PipelineConfig) -> None:
     """Reject settings that would otherwise be ignored or produce a wrong dataset.
 
     Raises ConfigurationError naming every problem found: unknown check names,
-    unknown tracking-system names, sampling rates that are not positive,
+    unknown tracking-system names, sampling rates that are not positive or are
+    missing for an enabled tracking system,
     ``validation.settings`` keys that no registered check declares, with
     masking on, ``masking_checks`` names that are not enabled checks, subject,
     session and task labels that are not BIDS labels, and session mappings that
@@ -100,6 +101,17 @@ def validate_config(config: PipelineConfig) -> None:
     not_positive = {name: rate for name, rate in config.sampling_frequencies.items() if rate <= 0}
     if not_positive:
         problems.append(f"sampling_frequencies must be positive; got {not_positive}")
+    no_rate = [
+        name
+        for name in system_names
+        if config.is_system_enabled(name) and name not in config.sampling_frequencies
+    ]
+    if no_rate:
+        problems.append(
+            f"sampling_frequencies has no entry for {no_rate}, which "
+            f"{'is' if len(no_rate) == 1 else 'are'} enabled; add the expected rate in Hz, or "
+            "set systems.<name>.enabled: false for a system that was not recorded"
+        )
 
     known_settings = sorted(set(check_registry.settings_keys) | set(ValidationConfig.SETTINGS_KEYS))
     unknown_settings = [key for key in config.validation.settings if key not in known_settings]

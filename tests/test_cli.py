@@ -171,6 +171,18 @@ class TestMainDryRun:
             in caplog.text
         )
 
+    def test_dry_run_rejects_a_missing_rate_for_an_enabled_system(
+        self, tmp_path, minimal_config_dict, caplog
+    ):
+        del minimal_config_dict["sampling_frequencies"]["Eyes"]
+        del minimal_config_dict["sampling_frequencies"]["Body"]
+        minimal_config_dict["systems"] = {"Body": {"enabled": False}}
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert "sampling_frequencies has no entry for ['Eyes'], which is enabled;" in caplog.text
+        assert "Body" not in caplog.text  # disabled, so it needs no rate
+
     def test_dry_run_rejects_an_unknown_system_in_system_descriptions(
         self, tmp_path, minimal_config_dict, caplog
     ):
@@ -254,6 +266,12 @@ class TestMainConfigErrors:
                 lambda cfg: cfg.update(session_mappings=[_mapping("a", "sub-01")]),
                 "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes "
                 "are added): subject_id of a 'sub-01'",
+            ),
+            (
+                lambda cfg: cfg["sampling_frequencies"].pop("Eyes"),
+                "sampling_frequencies has no entry for ['Eyes'], which is enabled; add the "
+                "expected rate in Hz, or set systems.<name>.enabled: false for a system that was "
+                "not recorded",
             ),
             (
                 lambda cfg: cfg["output"].update(task_name="VR tracking"),
@@ -434,4 +452,22 @@ class TestSessionMappingsAndLabels:
             _mapping("b", "01", "02"),
             _mapping("c", "P001", "pre"),
         ]
+        validate_config(PipelineConfig.model_validate(minimal_config_dict))
+
+
+class TestEnabledSystemsNeedARate:
+    """Every tracking system not disabled under systems needs a sampling rate."""
+
+    def test_two_missing_rates_are_named_together(self, minimal_config_dict):
+        del minimal_config_dict["sampling_frequencies"]["Face"]
+        del minimal_config_dict["sampling_frequencies"]["Controllers"]
+        with pytest.raises(ConfigurationError) as excinfo:
+            validate_config(PipelineConfig.model_validate(minimal_config_dict))
+        assert str(excinfo.value).startswith(
+            "sampling_frequencies has no entry for ['Face', 'Controllers'], which are enabled;"
+        )
+
+    def test_a_disabled_system_needs_no_rate(self, minimal_config_dict):
+        del minimal_config_dict["sampling_frequencies"]["Controllers"]
+        minimal_config_dict["systems"] = {"Controllers": {"enabled": False}}
         validate_config(PipelineConfig.model_validate(minimal_config_dict))

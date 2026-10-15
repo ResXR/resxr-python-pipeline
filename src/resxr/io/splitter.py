@@ -262,7 +262,7 @@ def split_continuous_data(
         if system.value not in sampling_frequencies:
             raise ConfigurationError(
                 f"Tracking system '{system.value}' is enabled but has no entry in "
-                "sampling_frequencies. Add it to config/pipeline_config.yaml."
+                "sampling_frequencies. Add it to the configuration file."
             )
         sampling_freq = sampling_frequencies[system.value]
 
@@ -316,7 +316,7 @@ def split_continuous_data(
         if "Face" not in sampling_frequencies:
             raise ConfigurationError(
                 "Face tracking is enabled but has no entry in sampling_frequencies. "
-                "Add it to config/pipeline_config.yaml."
+                "Add it to the configuration file."
             )
         streams[TrackingSystem.FACE] = TrackingStream(
             system=TrackingSystem.FACE,
