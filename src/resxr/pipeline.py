@@ -230,12 +230,15 @@ class _SessionOutputs:
     def remove(self, source_dir: str) -> None:
         """Delete what the skipped session created; warn about targets that existed."""
         removed: list[Path] = []
+        kept: list[Path] = []
         for target in self.marked:
             if self.existed[target]:
-                logger.warning(
-                    f"{target} existed before this run and may now hold partial files from "
-                    f"the skipped session {source_dir}; remove it or rerun."
-                )
+                if not any(folder in target.parents for folder in kept):  # one line per folder
+                    logger.warning(
+                        f"{target} existed before this run and may now hold partial files from "
+                        f"the skipped session {source_dir}; remove it or rerun."
+                    )
+                kept.append(target)
             elif target.exists():
                 action = shutil.rmtree if target.is_dir() else Path.unlink
                 if self._remove(target, action):

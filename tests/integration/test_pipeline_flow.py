@@ -1476,3 +1476,44 @@ def test_removal_never_reaches_the_input_or_outside_the_output(tmp_path, minimal
     assert not outputs._deletable(source / "x.csv")
     assert not outputs._deletable(tmp_path / "data" / "out" / "sub-09")  # holds the input
     assert not outputs._deletable(tmp_path / "data")
+
+
+def test_a_late_failure_in_an_existing_output_warns_once_per_folder(
+    tmp_path, minimal_config_dict, caplog, monkeypatch
+):
+    data_dir = tmp_path / "sessions"
+    _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
+    _write_clocked_session_dir(data_dir, "sess_b", session_id="B")
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    bids_root = tmp_path / "bids_out"
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+            {"source_dir": "sess_b", "subject_id": "02", "session_label": "01"},
+        ],
+        report=True,
+    )
+    run(str(cfg))  # a complete first run
+    _fail_report_of_session_a(monkeypatch)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        run(str(cfg))
+    warned = [
+        r.getMessage().split(" existed before")[0]
+        for r in caplog.records
+        if "existed before this run" in r.getMessage()
+    ]
+    assert warned == [  # the report inside sub-01/ses-01 gets no line of its own
+        str(bids_root / "sourcedata" / "sub-01" / "ses-01"),
+        str(bids_root / "sub-01" / "ses-01"),
+        str(bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01"),
+    ]
+    assert (bids_root / "sub-01" / "ses-01" / "A_report.html").exists()
+    assert "Removed the output" not in caplog.text
