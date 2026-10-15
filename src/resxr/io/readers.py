@@ -565,14 +565,17 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     # Metadata is required
     if files.metadata is None:
         raise MissingDataError(
-            f"No metadata file matching '{config.metadata_pattern}' in {session_dir}"
+            f"No metadata file matching '{config.metadata_pattern}' in {session_dir} "
+            "(every session folder needs one; the pattern is input.metadata_pattern)"
         )
     metadata = load_session_metadata(files.metadata)
 
     # Load continuous data (required)
     if files.continuous is None:
         raise MissingDataError(
-            f"No continuous data file matching '{config.continuous_data_pattern}' in {session_dir}"
+            f"No continuous data file matching '{config.continuous_data_pattern}' in "
+            f"{session_dir} (every session folder needs one; the pattern is "
+            "input.continuous_data_pattern)"
         )
     raw_continuous = load_continuous_data(files.continuous)
 

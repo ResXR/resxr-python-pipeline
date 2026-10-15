@@ -20,6 +20,12 @@ from .logger import get_logger
 
 logger = get_logger(__name__)
 
+# Names the column behind a stream's internal 'timestamp' in timing errors.
+_CLOCK_HINT = (
+    " (the stream's clock: its column in preprocessing.alternate_time_columns if the data "
+    "have it, otherwise timeSinceStartup)"
+)
+
 
 @dataclass
 class QualityFlag:
@@ -315,11 +321,14 @@ class TrackingStream:
         skips that session and continues with the others.
         """
         if "timestamp" not in self.data.columns:
-            raise DataLoadError(f"Stream {self.system.value}: missing 'timestamp' column")
+            raise DataLoadError(
+                f"Stream {self.system.value}: missing 'timestamp' column{_CLOCK_HINT}"
+            )
         for column in ("timestamp", GLOBAL_CLOCK_COLUMN):
             if column in self.data.columns and not pd.api.types.is_numeric_dtype(self.data[column]):
                 raise DataLoadError(
                     f"Stream {self.system.value}: non-numeric value in '{column}' column"
+                    + (_CLOCK_HINT if column == "timestamp" else "")
                 )
         if len(self.data) < 2:
             raise DataLoadError(
@@ -327,17 +336,20 @@ class TrackingStream:
             )
         start = self._start_timestamp()
         if start is None:
-            raise DataLoadError(f"Stream {self.system.value}: no non-zero timestamp found")
+            raise DataLoadError(
+                f"Stream {self.system.value}: no non-zero timestamp found{_CLOCK_HINT}"
+            )
         u = np.unique(self.data["timestamp"].values)
         u = u[u >= start]
         if u.size < 2:
             raise DataLoadError(
                 f"Stream {self.system.value}: fewer than 2 unique timestamps from first non-zero"
+                f"{_CLOCK_HINT}"
             )
         total = u[-1] - u[0]
         if total <= 0:
             raise DataLoadError(
-                f"Stream {self.system.value}: invalid timestamp span (total time <= 0)"
+                f"Stream {self.system.value}: invalid timestamp span (total time <= 0){_CLOCK_HINT}"
             )
         self.sampling_frequency_effective = (u.size - 1) / total
 

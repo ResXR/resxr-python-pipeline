@@ -156,8 +156,10 @@ class TestTrackingStreamEdgeCases:
     def test_untimeable_stream_raises_data_load_error(self, timestamps, message):
         """A stream that cannot be timed raises DataLoadError, so its session is skipped."""
         df = pd.DataFrame({"timestamp": timestamps, "Node_Head_px": [0.0, 0.0, 0.0]})
-        with pytest.raises(DataLoadError, match=message):
+        with pytest.raises(DataLoadError, match=message) as error:
             TrackingStream(system=TrackingSystem.HEAD, data=df, sampling_frequency=90.0)
+        # The message says which column the internal 'timestamp' is.
+        assert "preprocessing.alternate_time_columns" in str(error.value)
 
 
 # ===========================================================================

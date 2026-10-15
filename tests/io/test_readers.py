@@ -355,8 +355,9 @@ class TestLoadSession:
             session_dir / "test_ContinuousData.csv", index=False
         )
         config = self._input_config(tmp_path)
-        with pytest.raises(MissingDataError, match="metadata"):
+        with pytest.raises(MissingDataError, match="metadata") as error:
             load_session(session_dir, config)
+        assert "the pattern is input.metadata_pattern" in str(error.value)
 
     def test_missing_continuous_file_raises(self, tmp_path, tmp_metadata_json):
         """Session directory without continuous data raises MissingDataError."""
