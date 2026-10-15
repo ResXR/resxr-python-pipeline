@@ -32,6 +32,11 @@ _UNKNOWN_SETTINGS = (
     "validation.settings has unknown key(s) {keys}; keys the registered checks read: {known}"
 )
 
+
+def _mapping(source_dir: str, subject_id: str, session_label: str = "01") -> dict:
+    return {"source_dir": source_dir, "subject_id": subject_id, "session_label": session_label}
+
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -236,6 +241,25 @@ class TestMainConfigErrors:
                 lambda cfg: cfg.update(outputs={"bids_root": "elsewhere"}),
                 "Unknown top-level key(s) ['outputs']; check for typos. Known top-level keys: ",
             ),
+            (
+                lambda cfg: cfg.update(session_mappings=[_mapping("a", "01"), _mapping("b", "01")]),
+                "session_mappings maps 2 folders to sub-01 ses-01: a, b; each subject/session "
+                "pair must be unique",
+            ),
+            (
+                lambda cfg: cfg.update(session_mappings=[_mapping("a", "01"), _mapping("a", "02")]),
+                " 2 times (sub-01 ses-01, sub-02 ses-01); map each folder once",
+            ),
+            (
+                lambda cfg: cfg.update(session_mappings=[_mapping("a", "sub-01")]),
+                "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes "
+                "are added): subject_id of a 'sub-01'",
+            ),
+            (
+                lambda cfg: cfg["output"].update(task_name="VR tracking"),
+                "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes "
+                "are added): output.task_name 'VR tracking'",
+            ),
         ],
     )
     def test_config_error_exits_1_before_processing(
@@ -351,3 +375,63 @@ class TestSettingsKeysMustBeDeclared:
             validate_config(config)
         monkeypatch.setitem(check_registry._checks, _MyCheck.name, _MyCheck())
         validate_config(config)
+
+
+# ---------------------------------------------------------------------------
+# pipeline.validate_config — session mappings and BIDS labels
+# ---------------------------------------------------------------------------
+
+
+class TestSessionMappingsAndLabels:
+    """Mappings must be unique and labels must be BIDS labels (letters and digits)."""
+
+    @staticmethod
+    def _error(minimal_config_dict, mappings, task_name="vr") -> str:
+        minimal_config_dict["session_mappings"] = mappings
+        minimal_config_dict["output"]["task_name"] = task_name
+        with pytest.raises(ConfigurationError) as excinfo:
+            validate_config(PipelineConfig.model_validate(minimal_config_dict))
+        return str(excinfo.value)
+
+    def test_three_folders_mapped_to_one_pair_are_all_named(self, minimal_config_dict):
+        mappings = [
+            _mapping("a", "01"),
+            _mapping("b", "02"),
+            _mapping("c", "01"),
+            _mapping("d", "01"),
+        ]
+        assert self._error(minimal_config_dict, mappings) == (
+            "session_mappings maps 3 folders to sub-01 ses-01: a, c, d; each subject/session "
+            "pair must be unique"
+        )
+
+    def test_one_folder_mapped_twice_is_named_with_both_targets(
+        self, minimal_config_dict, tmp_path
+    ):
+        minimal_config_dict["input"]["data_dir"] = str(tmp_path)
+        mappings = [_mapping("a", "01"), _mapping(str(tmp_path / "a"), "02", "02")]
+        assert self._error(minimal_config_dict, mappings) == (
+            f"session_mappings maps the folder {(tmp_path / 'a').resolve()} 2 times "
+            "(sub-01 ses-01, sub-02 ses-02); map each folder once"
+        )
+
+    def test_every_invalid_label_is_named_with_its_field(self, minimal_config_dict):
+        mappings = [_mapping("a", "P-01"), _mapping("b", "02", "1_a"), _mapping("c", "")]
+        assert self._error(minimal_config_dict, mappings, task_name="task-vr") == (
+            "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes are "
+            "added): output.task_name 'task-vr', subject_id of a 'P-01', session_label of b "
+            "'1_a', subject_id of c ''"
+        )
+
+    @pytest.mark.parametrize("label", ["../evil", "a b", "é1", "01\n"])
+    def test_separators_spaces_and_non_ascii_are_not_labels(self, minimal_config_dict, label):
+        message = self._error(minimal_config_dict, [_mapping("a", label)])
+        assert f"subject_id of a {label!r}" in message
+
+    def test_unique_mappings_with_letter_and_digit_labels_are_accepted(self, minimal_config_dict):
+        minimal_config_dict["session_mappings"] = [
+            _mapping("a", "01"),
+            _mapping("b", "01", "02"),
+            _mapping("c", "P001", "pre"),
+        ]
+        validate_config(PipelineConfig.model_validate(minimal_config_dict))

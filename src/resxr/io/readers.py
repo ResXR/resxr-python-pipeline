@@ -350,6 +350,14 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
             "Add session_id (the prefix of the session's file names)."
         )
         session_id = "unknown"
+    elif isinstance(session_id, str) and (
+        "/" in session_id or "\\" in session_id or ".." in session_id
+    ):
+        raise DataLoadError(
+            f"{json_path}: session_id {json.dumps(session_id)} contains '/', '\\' or '..'; it "
+            "names the report and the custom-tables folder, so it must be a plain name (the "
+            "prefix of the session's file names). Correct session_id in the metadata file."
+        )
 
     flag_problems: dict[str, str] = {}
     flags = {

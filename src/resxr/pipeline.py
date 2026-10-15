@@ -18,6 +18,7 @@ BIDS output (``write_bids_output``):
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,14 +57,19 @@ from .visualization.report import ReportGenerator
 
 logger = get_logger(__name__)
 
+# A BIDS label (sub-<label>, ses-<label>, task-<label>): letters and digits only
+_BIDS_LABEL = re.compile(r"[A-Za-z0-9]+")
+
 
 def validate_config(config: PipelineConfig) -> None:
-    """Reject settings that would otherwise be ignored without a message.
+    """Reject settings that would otherwise be ignored or produce a wrong dataset.
 
     Raises ConfigurationError naming every problem found: unknown check names,
     unknown tracking-system names, sampling rates that are not positive,
-    ``validation.settings`` keys that no registered check declares, and, with
-    masking on, ``masking_checks`` names that are not enabled checks.
+    ``validation.settings`` keys that no registered check declares, with
+    masking on, ``masking_checks`` names that are not enabled checks, subject,
+    session and task labels that are not BIDS labels, and session mappings that
+    share a subject/session pair or a folder.
     """
     problems = []
     known_checks = check_registry.available_checks
@@ -102,6 +108,39 @@ def validate_config(config: PipelineConfig) -> None:
             f"validation.settings has unknown key(s) {unknown_settings}; keys the registered "
             f"checks read: {known_settings}"
         )
+
+    labels = [("output.task_name", config.output.task_name)]
+    for mapping in config.session_mappings:
+        labels += [
+            (f"subject_id of {mapping.source_dir}", mapping.subject_id),
+            (f"session_label of {mapping.source_dir}", mapping.session_label),
+        ]
+    not_labels = [f"{name} {value!r}" for name, value in labels if not _BIDS_LABEL.fullmatch(value)]
+    if not_labels:
+        problems.append(
+            "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes are "
+            f"added): {', '.join(not_labels)}"
+        )
+
+    by_target: dict[tuple[str, str], list[str]] = {}
+    by_folder: dict[Path, list[str]] = {}
+    for mapping in config.session_mappings:
+        target = (mapping.subject_id, mapping.session_label)
+        by_target.setdefault(target, []).append(mapping.source_dir)
+        folder = _source_dir(mapping, config).resolve()
+        by_folder.setdefault(folder, []).append(f"sub-{target[0]} ses-{target[1]}")
+    for (subject, session), folders in by_target.items():
+        if len(folders) > 1:
+            problems.append(
+                f"session_mappings maps {len(folders)} folders to sub-{subject} ses-{session}: "
+                f"{', '.join(folders)}; each subject/session pair must be unique"
+            )
+    for folder, targets in by_folder.items():
+        if len(targets) > 1:
+            problems.append(
+                f"session_mappings maps the folder {folder} {len(targets)} times "
+                f"({', '.join(targets)}); map each folder once"
+            )
 
     if config.preprocessing.apply_quality_masking and config.preprocessing.masking_checks:
         enabled = set(config.validation.enabled_checks)

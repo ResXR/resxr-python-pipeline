@@ -216,6 +216,18 @@ class TestSessionMetadataDepartures:
             "scans.tsv acq_time is n/a"
         ) in caplog.text
 
+    @pytest.mark.parametrize("session_id", ["../../evil", "a/b", "a\\b", ".."])
+    def test_a_session_id_with_a_path_separator_is_a_load_error(self, tmp_path, session_id):
+        path = tmp_path / "x_SessionMetadata.json"
+        path.write_text(json.dumps({"session_id": session_id}), encoding="utf-8")
+        with pytest.raises(DataLoadError) as excinfo:
+            load_session_metadata(path)
+        assert str(excinfo.value) == (
+            f"{path}: session_id {json.dumps(session_id)} contains '/', '\\' or '..'; it names "
+            "the report and the custom-tables folder, so it must be a plain name (the prefix of "
+            "the session's file names). Correct session_id in the metadata file."
+        )
+
     def test_metadata_that_is_not_an_object_is_a_load_error(self, tmp_path):
         path = tmp_path / "x_SessionMetadata.json"
         path.write_text("[1, 2]", encoding="utf-8")
