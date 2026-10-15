@@ -1056,3 +1056,25 @@ def test_header_only_continuous_file_skips_the_session_with_an_error(
         f"{data_dir / 'sess_a'}: the continuous data file has no data rows"
     ) in caplog.text
     assert result.exit_code == 1
+
+
+def test_events_columns_without_a_description_are_listed(tmp_path, minimal_config_dict, caplog):
+    data_dir = tmp_path / "sessions"
+    session_dir = _write_session_dir(data_dir, "sess_e", session_id="E")
+    events_path = session_dir / "E_EventsData.csv"
+    pd.read_csv(events_path).assign(stim_file="img.png", block=1).to_csv(events_path, index=False)
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=[{"source_dir": "sess_e", "subject_id": "01", "session_label": "01"}],
+    )
+    run(str(cfg))
+    assert (
+        "Session 'E': events.tsv columns not described in events.json: stim_file, block"
+    ) in caplog.text
+    events = pd.read_csv(
+        tmp_path / "bids_out" / "sub-01" / "ses-01" / "sub-01_ses-01_task-vr_events.tsv", sep="\t"
+    )
+    assert {"stim_file", "block"} <= set(events.columns)  # still passed through

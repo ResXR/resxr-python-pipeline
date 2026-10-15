@@ -723,3 +723,69 @@ class TestClockDepartures:
         path.write_text("timeSinceStartup;Node_Head_px\n1,0;0,1\n1,1;0,2;3,4,5\n", encoding="utf-8")
         with pytest.raises(DataLoadError, match="'.' as the decimal separator"):
             load_continuous_data(path)
+
+
+# ===========================================================================
+# Optional inputs that are absent or misnamed are reported
+# ===========================================================================
+
+
+class TestOptionalInputsAreReported:
+    @staticmethod
+    def _config(tmp_path: Path) -> InputConfig:
+        return InputConfig(
+            data_dir=tmp_path,
+            continuous_data_pattern="*_ContinuousData.csv",
+            face_data_pattern="*_FaceExpressionData.csv",
+            metadata_pattern="session_metadata.json",
+            events_data_pattern="*_EventsData.csv",
+        )
+
+    @staticmethod
+    def _load(session_dir, config, caplog):
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            return load_session(session_dir, config)
+
+    def test_missing_events_file_is_info_at_default_level(self, tmp_session_dir, tmp_path, caplog):
+        (tmp_session_dir / "test_EventsData.csv").unlink()
+        self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        (record,) = [r for r in caplog.records if "No events file" in r.getMessage()]
+        assert record.levelname == "INFO"
+        assert record.getMessage() == (
+            f"No events file matching '*_EventsData.csv' in {tmp_session_dir}; "
+            "no events.tsv is written (no custom tables either)."
+        )
+
+    def test_misnamed_events_file_is_a_warning_naming_it(self, tmp_session_dir, tmp_path, caplog):
+        (tmp_session_dir / "test_EventsData.csv").rename(tmp_session_dir / "test_Event.csv")
+        self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        (record,) = [r for r in caplog.records if "No events file" in r.getMessage()]
+        assert record.levelname == "WARNING"
+        assert "['test_Event.csv'] not read (rename it or set input.events_data_pattern)" in (
+            record.getMessage()
+        )
+
+    def test_misnamed_custom_tables_folder_is_a_warning(self, tmp_session_dir, tmp_path, caplog):
+        (tmp_session_dir / "CustomTables").mkdir()
+        pd.DataFrame({"onset": [0.1], "duration": [0.0]}).to_csv(
+            tmp_session_dir / "CustomTables" / "test_session_001_Trials.csv", index=False
+        )
+        session = self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        assert session.custom_tables_data == {}
+        assert (
+            f"Custom tables folder(s) ['CustomTables'] in {tmp_session_dir} do not match the "
+            "expected name 'test_session_001_CustomTables' (from session_id 'test_session_001'), "
+            "so their tables are not read."
+        ) in caplog.text
+
+    def test_several_matching_files_name_the_one_used(self, tmp_session_dir, tmp_path, caplog):
+        import os
+        import shutil
+
+        newer = tmp_session_dir / "test_b_EventsData.csv"
+        shutil.copy(tmp_session_dir / "test_EventsData.csv", newer)
+        os.utime(newer, (2_000_000_000, 2_000_000_000))
+        self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        assert "using most recent by mtime: test_b_EventsData.csv." in caplog.text

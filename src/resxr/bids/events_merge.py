@@ -50,7 +50,10 @@ def merge_events(
     if native_events_df is not None and not native_events_df.empty:
         onset = pd.to_numeric(native_events_df["onset"], errors="coerce")
         if onset.isna().any():
-            raise DataLoadError("Native events contain a null/non-numeric onset value.")
+            raise DataLoadError(
+                "Native events contain a null/non-numeric onset value. Every row of the "
+                "Events CSV needs a numeric onset."
+            )
 
     # 3. Cross-class column collision check (metadata-aware).
     exclude = set(STANDARD_COLS)

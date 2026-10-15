@@ -510,6 +510,13 @@ def write_bids_output(
             f"_task-{config.output.task_name}_events.tsv"
         )
         sidecar = generate_events_sidecar(session.merged_events_data, session.custom_tables)
+        undescribed = [c for c in session.merged_events_data.columns if c not in sidecar]
+        if undescribed:
+            logger.warning(
+                f"Session '{session.session_id}': events.tsv columns not described in "
+                f"events.json: {', '.join(undescribed)} (extra Events CSV columns, or "
+                "custom-table columns missing from the CustomTables sidecar)"
+            )
         write_bids_events(session.merged_events_data, events_path, sidecar)
         logger.info(f"Wrote events: {events_path.name}")
 

@@ -490,13 +490,16 @@ def find_session_files(session_dir: Path, config: InputConfig) -> SessionFiles:
 
     def _most_recent(pattern: str) -> Path | None:
         files = list(session_dir.glob(pattern))
+        chosen = max(files, key=lambda p: p.stat().st_mtime) if files else None
         if len(files) > 1:
             logger.warning(
-                "Multiple files matched '%s' in %s; using most recent by mtime.",
+                "Multiple files matched '%s' in %s; using most recent by mtime: %s. "
+                "Keep one file per pattern in each session folder.",
                 pattern,
                 session_dir,
+                chosen.name,
             )
-        return max(files, key=lambda p: p.stat().st_mtime) if files else None
+        return chosen
 
     return SessionFiles(
         continuous=_most_recent(config.continuous_data_pattern),
@@ -504,6 +507,27 @@ def find_session_files(session_dir: Path, config: InputConfig) -> SessionFiles:
         metadata=_most_recent(config.metadata_pattern),
         events=_most_recent(config.events_data_pattern),
     )
+
+
+def _report_missing_events(session_dir: Path, pattern: str, has_custom_tables: bool) -> None:
+    """Say that no events file was read: INFO, or WARNING when a similar file is present."""
+    consequence = (
+        "events.tsv is built from the custom tables only"
+        if has_custom_tables
+        else "no events.tsv is written (no custom tables either)"
+    )
+    similar = sorted(
+        p.name
+        for p in session_dir.iterdir()
+        if p.is_file() and p.suffix.lower() == ".csv" and "event" in p.name.lower()
+    )
+    if similar:
+        logger.warning(
+            f"No events file matching '{pattern}' in {session_dir}; {similar} not read (rename "
+            f"it or set input.events_data_pattern). {consequence[0].upper()}{consequence[1:]}."
+        )
+    else:
+        logger.info(f"No events file matching '{pattern}' in {session_dir}; {consequence}.")
 
 
 def load_session(session_dir: Path, config: InputConfig) -> Session:
@@ -569,8 +593,22 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     # CustomTables sidecar and the custom data-class CSVs.
     custom_dir = session_dir / f"{metadata.session_id}_CustomTables"
     if not custom_dir.is_dir():
-        # Custom tables are optional; absence is normal, not an error.
-        logger.debug("No custom tables folder for this session: %s", custom_dir)
+        # Custom tables are optional; absence is normal, not an error. A folder
+        # whose name ends like one but does not match is reported, since its
+        # tables would otherwise be ignored without a message.
+        others = sorted(
+            p.name
+            for p in session_dir.iterdir()
+            if p.is_dir() and p.name.lower().endswith("customtables")
+        )
+        if others:
+            logger.warning(
+                f"Custom tables folder(s) {others} in {session_dir} do not match the expected "
+                f"name '{custom_dir.name}' (from session_id '{metadata.session_id}'), so their "
+                "tables are not read. Rename the folder or correct session_id."
+            )
+        else:
+            logger.debug("No custom tables folder for this session: %s", custom_dir)
     custom_csvs = find_custom_class_csvs(custom_dir, metadata.session_id)
     custom_tables_data = {name: load_custom_class_csv(p) for name, p in custom_csvs.items()}
 
@@ -611,6 +649,9 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
                         len(df),
                         custom_dir,
                     )
+
+    if raw_events is None:
+        _report_missing_events(session_dir, config.events_data_pattern, bool(custom_tables_data))
 
     # Create session
     session = Session(
