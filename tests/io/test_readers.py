@@ -701,10 +701,12 @@ class TestClockDepartures:
 
         clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
         path, df = self._load(tmp_path, clock, caplog)
-        assert f"{path}: the median timeSinceStartup step is 13.89, so the column looks " in (
-            caplog.text
-        )
-        assert "It is read as seconds and not converted" in caplog.text
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: the median timeSinceStartup step is 13.89, so the column looks like "
+            "milliseconds or the recording is slower than 2 Hz. It is read as seconds and not "
+            "converted: if it holds milliseconds, latencies, flag times and event onsets will "
+            "be wrong. Write it in seconds"
+        ]
         assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
 
     def test_backward_steps_are_counted_and_rows_kept_in_order(self, tmp_path, caplog):

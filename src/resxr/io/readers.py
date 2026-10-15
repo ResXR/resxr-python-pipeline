@@ -60,8 +60,9 @@ def check_clock(values: pd.Series, source: Path) -> None:
     if median_step > _CLOCK_STEP_LOOKS_LIKE_MS:
         logger.warning(
             f"{source}: the median {GLOBAL_CLOCK_COLUMN} step is {median_step:.4g}, so the "
-            "column looks like milliseconds. It is read as seconds and not converted: "
-            "latencies, flag times and event onsets will be wrong. Write it in seconds"
+            "column looks like milliseconds or the recording is slower than 2 Hz. It is read "
+            "as seconds and not converted: if it holds milliseconds, latencies, flag times and "
+            "event onsets will be wrong. Write it in seconds"
         )
 
 
