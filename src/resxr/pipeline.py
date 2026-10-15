@@ -33,7 +33,7 @@ from .bids.metadata import (
 )
 from .core.config import PipelineConfig, SessionMapping
 from .core.constants import TrackingSystem
-from .core.exceptions import ResXRError
+from .core.exceptions import ConfigurationError, ResXRError
 from .core.logger import get_logger
 from .core.session import Session
 from .io.readers import discover_sessions, load_session
@@ -54,6 +54,49 @@ from .visualization.report import ReportGenerator
 logger = get_logger(__name__)
 
 
+def validate_config(config: PipelineConfig) -> None:
+    """Reject settings that would otherwise be ignored without a message.
+
+    Raises ConfigurationError naming every problem found: check names that no
+    registered check has (in ``validation.enabled_checks`` or
+    ``preprocessing.masking_checks``), tracking-system names that do not exist
+    (keys of ``systems``, ``sampling_frequencies`` and
+    ``preprocessing.alternate_time_columns``), and sampling rates that are not
+    positive.
+    """
+    problems = []
+    known_checks = check_registry.available_checks
+    for setting, names in (
+        ("validation.enabled_checks", config.validation.enabled_checks),
+        ("preprocessing.masking_checks", config.preprocessing.masking_checks or []),
+    ):
+        unknown = [name for name in names if name not in known_checks]
+        if unknown:
+            problems.append(
+                f"{setting} names unknown check(s) {unknown}; valid check names: "
+                f"{sorted(known_checks)}"
+            )
+
+    system_names = [system.value for system in TrackingSystem]
+    for setting, keys in (
+        ("systems", config.systems),
+        ("sampling_frequencies", config.sampling_frequencies),
+        ("preprocessing.alternate_time_columns", config.preprocessing.alternate_time_columns),
+    ):
+        unknown = [key for key in keys if key not in system_names]
+        if unknown:
+            problems.append(
+                f"{setting} names unknown tracking system(s) {unknown}; valid names: {system_names}"
+            )
+
+    not_positive = {name: rate for name, rate in config.sampling_frequencies.items() if rate <= 0}
+    if not_positive:
+        problems.append(f"sampling_frequencies must be positive; got {not_positive}")
+
+    if problems:
+        raise ConfigurationError("; ".join(problems))
+
+
 def run(config_path: str = "config/pipeline_config.yaml") -> None:
     """
     Run the complete ResXR pipeline.
@@ -63,8 +106,9 @@ def run(config_path: str = "config/pipeline_config.yaml") -> None:
     config_path : str
         Path to YAML configuration file
     """
-    # Load configuration
+    # Load and check the configuration before any session is processed
     config = PipelineConfig.from_yaml(Path(config_path))
+    validate_config(config)
 
     # Setup logging
     logger.info(f"Starting ResXR pipeline with config: {config_path}")

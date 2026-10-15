@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import pipeline
+from .core.exceptions import ConfigurationError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -117,6 +118,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             from .core.config import PipelineConfig
 
             config = PipelineConfig.from_yaml(config_path)
+            pipeline.validate_config(config)
             logger.info(f"Configuration valid: {config_path}")
             logger.info(f"  Input directory: {config.input.data_dir}")
             logger.info(f"  Output directory: {config.output.bids_root}")
@@ -134,6 +136,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         logger.info("Pipeline interrupted by user")
         return 130
+    except ConfigurationError as e:
+        logger.error(f"Configuration error in {config_path}: {e}")
+        return 1
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
         if args.verbose:

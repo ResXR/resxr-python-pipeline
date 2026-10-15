@@ -97,3 +97,62 @@ class TestMainDryRun:
         out_dir = tmp_path / "output"
         main(["--config", str(valid_config_yaml), "--dry-run"])
         assert not out_dir.exists()
+
+    def test_dry_run_rejects_misspelled_check_name(self, tmp_path, minimal_config_dict, caplog):
+        minimal_config_dict["validation"]["enabled_checks"] = ["hand_tracking_loss"]
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert "validation.enabled_checks names unknown check(s) ['hand_tracking_loss']" in (
+            caplog.text
+        )
+        assert "hands_tracking_loss" in caplog.text  # the valid names are listed
+
+
+# ---------------------------------------------------------------------------
+# main() — configuration errors stop the run before any session
+# ---------------------------------------------------------------------------
+
+
+class TestMainConfigErrors:
+    """A configuration error exits 1 before any session is read or written."""
+
+    @pytest.mark.parametrize(
+        ("edit", "message"),
+        [
+            (
+                lambda cfg: cfg["validation"].update(enabled_checks=["hand_tracking_loss"]),
+                "validation.enabled_checks names unknown check(s) ['hand_tracking_loss']",
+            ),
+            (
+                lambda cfg: cfg["preprocessing"].update(masking_checks=["eye_closed"]),
+                "preprocessing.masking_checks names unknown check(s) ['eye_closed']",
+            ),
+            (
+                lambda cfg: cfg.update(systems={"Hand": {"enabled": False}}),
+                "systems names unknown tracking system(s) ['Hand']",
+            ),
+            (
+                lambda cfg: cfg["preprocessing"].update(
+                    alternate_time_columns={"Eye": "Eyes_Time"}
+                ),
+                "preprocessing.alternate_time_columns names unknown tracking system(s) ['Eye']",
+            ),
+            (
+                lambda cfg: cfg["sampling_frequencies"].update(Hands=0.0),
+                "sampling_frequencies must be positive; got {'Hands': 0.0}",
+            ),
+        ],
+    )
+    def test_config_error_exits_1_before_processing(
+        self, tmp_path, minimal_config_dict, caplog, edit, message
+    ):
+        edit(minimal_config_dict)
+        minimal_config_dict["input"]["data_dir"] = str(tmp_path / "data")
+        minimal_config_dict["output"]["bids_root"] = str(tmp_path / "out")
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path)]) == 1
+        assert f"Configuration error in {path}: " in caplog.text
+        assert message in caplog.text
+        assert not (tmp_path / "out").exists()
