@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from ..core.config import InputConfig
@@ -21,6 +22,47 @@ from ..core.logger import get_logger
 from ..core.session import ColumnInfoEntry, CustomTableSchema, Session, SessionMetadata
 
 logger = get_logger(__name__)
+
+# A median timeSinceStartup step above this many seconds suggests milliseconds.
+_CLOCK_STEP_LOOKS_LIKE_MS = 0.5
+
+
+def check_clock(values: pd.Series, source: Path) -> None:
+    """Warn about a timeSinceStartup column that departs from the input contract.
+
+    The column must be in seconds, never step backward and have a value in every
+    row. Leading and trailing zero rows are allowed (before onset and after
+    offset) and are ignored here. Nothing is changed: the pipeline does not
+    sort rows or convert units. A non-numeric column is left to the stream
+    check, which skips the session.
+    """
+    if not pd.api.types.is_numeric_dtype(values):
+        return
+    t = values.to_numpy(dtype=float)
+    missing = int(np.isnan(t).sum())
+    if missing:
+        logger.warning(
+            f"{source}: {missing} row(s) have no {GLOBAL_CLOCK_COLUMN} value (empty or NaN); "
+            "their global latency is n/a"
+        )
+    valid = t[np.isfinite(t) & (t != 0)]
+    if valid.size < 2:
+        return
+    steps = np.diff(valid)
+    backward = int((steps < 0).sum())
+    if backward:
+        logger.warning(
+            f"{source}: {GLOBAL_CLOCK_COLUMN} goes backward {backward} time(s). Rows are kept "
+            "in file order, so latencies decrease there and flags near those rows may be "
+            f"wrong; sort the rows by {GLOBAL_CLOCK_COLUMN} if they were written out of order"
+        )
+    median_step = float(np.median(steps))
+    if median_step > _CLOCK_STEP_LOOKS_LIKE_MS:
+        logger.warning(
+            f"{source}: the median {GLOBAL_CLOCK_COLUMN} step is {median_step:.4g}, so the "
+            "column looks like milliseconds. It is read as seconds and not converted: "
+            "latencies, flag times and event onsets will be wrong. Write it in seconds"
+        )
 
 
 def load_continuous_data(csv_path: Path) -> pd.DataFrame:
@@ -51,6 +93,11 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
             low_memory=False,
             encoding="utf-8-sig",  # Handle BOM
         )
+    except pd.errors.ParserError as e:
+        raise DataLoadError(
+            f"Failed to load {csv_path}: {e}. The file must be comma-separated, with '.' as "
+            "the decimal separator"
+        ) from e
     except Exception as e:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
 
@@ -62,8 +109,12 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
         df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
 
     if "timestamp" not in df.columns:
-        raise DataLoadError(f"No timestamp column found in {csv_path}")
+        raise DataLoadError(
+            f"No timestamp column found in {csv_path}: the file must be comma-separated, with "
+            f"a header row that includes {GLOBAL_CLOCK_COLUMN}"
+        )
 
+    check_clock(df["timestamp"], csv_path)
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
     return df
 
@@ -104,6 +155,8 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
         df = df.rename(columns={GLOBAL_CLOCK_COLUMN: "timestamp"})
     elif f"\ufeff{GLOBAL_CLOCK_COLUMN}" in df.columns:
         df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
+    if "timestamp" in df.columns:
+        check_clock(df["timestamp"], csv_path)
 
     if "Face_Status" in df.columns:
         if df["Face_Status"].dtype == object:
@@ -126,9 +179,10 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
         new_na = df["Face_Status"].isna() & ~was_na
         if new_na.any():
             logger.warning(
-                "Face_Status contains %d unmapped values that became NaN. "
+                "Face_Status contains %d unmapped values that became NaN (%s). "
                 "Check the source data for unexpected representations.",
                 new_na.sum(),
+                csv_path,
             )
 
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")

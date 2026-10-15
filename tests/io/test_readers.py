@@ -654,3 +654,72 @@ class TestLoadSessionCustomTableLogging:
             session = load_session(d, self._config(tmp_path))
         assert session.custom_tables is not None  # exact sess_CustomTables.json was used
         assert "Multiple files matching" in caplog.text
+
+
+# ===========================================================================
+# timeSinceStartup departures are reported (never converted or sorted)
+# ===========================================================================
+
+
+class TestClockDepartures:
+    @staticmethod
+    def _load(tmp_path, clock, caplog):
+        import logging
+
+        import numpy as np
+
+        path = tmp_path / "x_ContinuousData.csv"
+        n = len(clock)
+        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": np.zeros(n)}).to_csv(
+            path, index=False
+        )
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            df = load_continuous_data(path)
+        return path, df
+
+    def test_valid_clock_with_leading_and_trailing_zeros_is_silent(self, tmp_path, caplog):
+        import numpy as np
+
+        clock = np.r_[0.0, 0.0, 1.0 + np.arange(50) / 72.0, 0.0]
+        self._load(tmp_path, clock, caplog)
+        assert caplog.records == []
+
+    def test_milliseconds_are_reported_and_not_converted(self, tmp_path, caplog):
+        import numpy as np
+
+        clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
+        path, df = self._load(tmp_path, clock, caplog)
+        assert f"{path}: the median timeSinceStartup step is 13.89, so the column looks " in (
+            caplog.text
+        )
+        assert "It is read as seconds and not converted" in caplog.text
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_backward_steps_are_counted_and_rows_kept_in_order(self, tmp_path, caplog):
+        import numpy as np
+
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[10:20] = clock[10:20][::-1]
+        path, df = self._load(tmp_path, clock, caplog)
+        assert f"{path}: timeSinceStartup goes backward 9 time(s)." in caplog.text
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_empty_clock_cells_are_counted(self, tmp_path, caplog):
+        import numpy as np
+
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[5:8] = np.nan
+        path, _ = self._load(tmp_path, clock, caplog)
+        assert f"{path}: 3 row(s) have no timeSinceStartup value (empty or NaN)" in caplog.text
+
+    def test_semicolon_file_names_the_expected_format(self, tmp_path):
+        path = tmp_path / "x_ContinuousData.csv"
+        path.write_text("timeSinceStartup;Node_Head_px\n1.0;0.1\n1.1;0.2\n", encoding="utf-8")
+        with pytest.raises(DataLoadError, match="must be comma-separated, with a header row"):
+            load_continuous_data(path)
+
+    def test_decimal_comma_file_names_the_expected_format(self, tmp_path):
+        path = tmp_path / "x_ContinuousData.csv"
+        path.write_text("timeSinceStartup;Node_Head_px\n1,0;0,1\n1,1;0,2;3,4,5\n", encoding="utf-8")
+        with pytest.raises(DataLoadError, match="'.' as the decimal separator"):
+            load_continuous_data(path)
