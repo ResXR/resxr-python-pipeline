@@ -1316,3 +1316,163 @@ def test_events_columns_without_a_description_are_listed(tmp_path, minimal_confi
         tmp_path / "bids_out" / "sub-01" / "ses-01" / "sub-01_ses-01_task-vr_events.tsv", sep="\t"
     )
     assert {"stim_file", "block"} <= set(events.columns)  # still passed through
+
+
+# ── A skipped session leaves nothing in the output (D9) ──────────────
+
+
+def _session_outputs(bids_root: Path, sub: str) -> list[Path]:
+    """Every sourcedata, raw and derivative path of one subject that exists."""
+    trees = (bids_root / "sourcedata" / sub, bids_root / sub)
+    trees += (bids_root / "derivatives" / "resxr" / sub,)
+    return [tree for tree in trees if tree.exists()]
+
+
+def _files(folder: Path) -> dict[str, bytes]:
+    return {
+        p.relative_to(folder).as_posix(): p.read_bytes() for p in folder.rglob("*") if p.is_file()
+    }
+
+
+def test_a_session_skipped_at_the_split_leaves_no_output(tmp_path, minimal_config_dict, caplog):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _zero_hands_clock(data_dir / "sess_a")  # as 4 Oct case S3: skipped after its sourcedata copy
+    bids_root = tmp_path / "bids_out"
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert _session_outputs(bids_root, "sub-01") == []
+    (removed,) = [r for r in caplog.records if r.getMessage().startswith("Removed the output")]
+    assert removed.levelname == "INFO"
+    assert removed.getMessage() == (
+        f"Removed the output written for skipped session sess_a: {Path('sourcedata', 'sub-01')}"
+    )
+    assert _files(bids_root / "sourcedata" / "sub-02" / "ses-01") == _files(data_dir / "sess_b")
+    assert list((bids_root / "sub-02" / "ses-01" / "motion").glob("*_motion.tsv"))
+    deriv = bids_root / "derivatives" / "resxr" / "sub-02" / "ses-01" / "motion"
+    assert list(deriv.glob("*_motion.tsv"))
+    assert _files(data_dir / "sess_a")  # the input is untouched
+
+
+def _fail_report_of_session_a(monkeypatch) -> None:
+    """Write session A's report, then raise, as a late error in the report step would."""
+    import resxr.pipeline as pipeline_module
+
+    generate = pipeline_module.ReportGenerator.generate
+
+    def generate_or_fail(self, session, output_path, *args, **kwargs):
+        written = generate(self, session, output_path, *args, **kwargs)
+        if session.session_id == "A":
+            raise TypeError("must be real number, not str")
+        return written
+
+    monkeypatch.setattr(pipeline_module.ReportGenerator, "generate", generate_or_fail)
+
+
+@pytest.mark.parametrize("report_dir", [None, "reports"], ids=["report_in_session", "report_dir"])
+def test_a_late_failure_removes_every_file_of_that_session(
+    tmp_path, minimal_config_dict, caplog, monkeypatch, report_dir
+):
+    data_dir = tmp_path / "sessions"
+    _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
+    _write_clocked_session_dir(data_dir, "sess_b", session_id="B")
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    if report_dir is not None:
+        minimal_config_dict["report"]["output_dir"] = str(tmp_path / report_dir)
+    bids_root = tmp_path / "bids_out"
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+            {"source_dir": "sess_b", "subject_id": "02", "session_label": "01"},
+        ],
+        report=True,
+    )
+    _fail_report_of_session_a(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert result.skipped[0].reason == "unexpected error: TypeError: must be real number, not str"
+    assert _session_outputs(bids_root, "sub-01") == []
+    reports = tmp_path / report_dir if report_dir else bids_root / "sub-02" / "ses-01"
+    assert [p.name for p in reports.rglob("*_report.html")] == ["B_report.html"]
+    shown = [str(Path("derivatives", "resxr", "sub-01")), str(Path("sourcedata", "sub-01"))]
+    shown += [str(tmp_path / report_dir / "A_report.html")] if report_dir else []
+    shown.append("sub-01")
+    assert (
+        f"Removed the output written for skipped session sess_a: {', '.join(sorted(shown))}"
+    ) in caplog.text
+    assert list((bids_root / "sub-02" / "ses-01" / "motion").glob("*_motion.tsv"))
+    assert (bids_root / "sourcedata" / "sub-02" / "ses-01").exists()
+    participants = pd.read_csv(bids_root / "participants.tsv", sep="\t")
+    assert list(participants["participant_id"]) == ["sub-02"]
+
+
+def test_a_session_folder_that_existed_before_is_kept_with_a_warning(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    bids_root = tmp_path / "bids_out"
+    run(str(cfg))  # a complete first run (output.overwrite is true in this config)
+    before = {tree: _files(tree) for tree in _session_outputs(bids_root, "sub-01")}
+    assert len(before) == 3
+    _zero_hands_clock(data_dir / "sess_a")
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    after = {tree: _files(tree) for tree in _session_outputs(bids_root, "sub-01")}
+    assert after.keys() == before.keys()  # every folder kept
+    sourcedata_tree = bids_root / "sourcedata" / "sub-01"
+    for tree in before:  # raw and derivative files kept as they were
+        assert after[tree] == before[tree] or tree == sourcedata_tree
+    # the sourcedata copy was redone (output.overwrite) before the session failed
+    assert after[sourcedata_tree].keys() == before[sourcedata_tree].keys()
+    assert after[sourcedata_tree] != before[sourcedata_tree]
+    sourcedata = bids_root / "sourcedata" / "sub-01" / "ses-01"
+    (warning,) = [r for r in caplog.records if "existed before this run" in r.getMessage()]
+    assert warning.levelname == "WARNING"
+    assert warning.getMessage() == (
+        f"{sourcedata} existed before this run and may now hold partial files from the "
+        "skipped session sess_a; remove it or rerun."
+    )
+    assert "Removed the output" not in caplog.text
+
+
+def test_a_session_skipped_while_loading_writes_and_removes_nothing(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    (data_dir / "sess_a" / "session_metadata.json").unlink()
+    bids_root = tmp_path / "bids_out"
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert _session_outputs(bids_root, "sub-01") == []
+    assert "Removed the output" not in caplog.text
+    assert "existed before this run" not in caplog.text
+
+
+def test_removal_never_reaches_the_input_or_outside_the_output(tmp_path, minimal_config_dict):
+    from resxr.core.config import PipelineConfig
+    from resxr.pipeline import _SessionOutputs
+
+    minimal_config_dict["input"]["data_dir"] = str(tmp_path / "data")
+    minimal_config_dict["output"]["bids_root"] = str(tmp_path / "data" / "out")
+    config = PipelineConfig.model_validate(minimal_config_dict)
+    bids = SimpleNamespace(bids_root=tmp_path / "data" / "out")
+    source = tmp_path / "data" / "out" / "sub-09" / "ses-01"  # an input folder in the output
+    outputs = _SessionOutputs(config, bids, [source])
+    assert outputs._deletable(tmp_path / "data" / "out" / "sub-01")
+    assert not outputs._deletable(tmp_path / "data" / "out")  # the BIDS root itself
+    assert not outputs._deletable(tmp_path / "elsewhere" / "sub-01")
+    assert not outputs._deletable(source)
+    assert not outputs._deletable(source / "x.csv")
+    assert not outputs._deletable(tmp_path / "data" / "out" / "sub-09")  # holds the input
+    assert not outputs._deletable(tmp_path / "data")
