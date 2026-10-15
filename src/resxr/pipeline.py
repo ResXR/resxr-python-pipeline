@@ -155,6 +155,8 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
 
     A session that cannot be processed is logged as an error and skipped; the
     run continues with the others and ends with a summary of every session.
+    An unexpected error (not a ResXRError) is handled the same way, with its
+    traceback at DEBUG; KeyboardInterrupt still stops the run.
 
     Parameters
     ----------
@@ -213,6 +215,7 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
         )
         counter = _MessageCounter()
         resxr_logger.addHandler(counter)
+        unexpected: Exception | None = None
         try:
             session = process_session_from_mapping(mapping, config, bids, enabled_systems)
             outcome.processed = True
@@ -227,11 +230,16 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
             )
         except ResXRError as e:
             outcome.reason = str(e)
+        except Exception as e:  # not foreseen by the code: skip this session only
+            outcome.reason = f"unexpected error: {type(e).__name__}: {e}"
+            unexpected = e
         finally:
             resxr_logger.removeHandler(counter)
         outcome.warnings, outcome.errors = counter.warnings, counter.errors
         if not outcome.processed:
             logger.error(f"Failed to process {mapping.source_dir}: {outcome.reason}")
+            if unexpected is not None:
+                logger.debug("Traceback of the unexpected error:", exc_info=unexpected)
         result.sessions.append(outcome)
 
     # Write dataset-level files only if at least one session succeeded

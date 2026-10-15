@@ -993,6 +993,56 @@ def test_every_session_failing_gives_an_error_summary_and_exit_code_1(
     assert not (tmp_path / "bids_out" / "dataset_description.json").exists()
 
 
+def _fail_session_a(monkeypatch, error: BaseException) -> None:
+    """Make the split of session 'A' raise *error*; other sessions are split as usual."""
+    import resxr.pipeline as pipeline_module
+
+    split = pipeline_module.split_continuous_data
+
+    def split_or_fail(session, *args, **kwargs):
+        if session.session_id == "A":
+            raise error
+        return split(session, *args, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "split_continuous_data", split_or_fail)
+
+
+def test_an_unexpected_error_skips_only_that_session(
+    tmp_path, minimal_config_dict, caplog, monkeypatch
+):
+    from resxr.cli import main
+
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _fail_session_a(monkeypatch, ValueError("boom"))
+    with caplog.at_level(logging.DEBUG, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert result.skipped[0].reason == "unexpected error: ValueError: boom"
+    assert result.exit_code == 1
+    (failed,) = [r for r in caplog.records if r.getMessage().startswith("Failed to process")]
+    assert failed.levelname == "ERROR"
+    assert failed.getMessage() == "Failed to process sess_a: unexpected error: ValueError: boom"
+    (traceback,) = [r for r in caplog.records if r.exc_info]
+    assert traceback.levelname == "DEBUG"
+    assert traceback.exc_info[0] is ValueError
+    assert "  skipped sess_a (sub-01 ses-01): unexpected error: ValueError: boom" in caplog.text
+    assert list((tmp_path / "bids_out" / "sub-02" / "ses-01" / "motion").glob("*_motion.tsv"))
+    assert main(["-c", str(cfg)]) == 1
+
+
+def test_keyboard_interrupt_in_a_session_still_stops_the_run(
+    tmp_path, minimal_config_dict, monkeypatch
+):
+    from resxr.cli import main
+
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _fail_session_a(monkeypatch, KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        run(str(cfg))
+    assert not (tmp_path / "bids_out" / "sub-02").exists()
+    assert main(["-c", str(cfg)]) == 130
+
+
 def test_checks_not_run_appear_in_the_summary(tmp_path, minimal_config_dict, caplog):
     data_dir = tmp_path / "sessions"
     session_dir = _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
