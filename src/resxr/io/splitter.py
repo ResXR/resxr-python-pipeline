@@ -21,7 +21,7 @@ which runs at write time.
 
 from __future__ import annotations
 
-from ..core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
+from ..core.constants import GLOBAL_CLOCK_COLUMN, SYSTEM_COLUMN_PREFIXES, TrackingSystem
 from ..core.exceptions import ConfigurationError
 from ..core.logger import get_logger
 from ..core.session import Session, SessionMetadata, TrackingStream
@@ -81,12 +81,66 @@ def _log_not_enabled_in_metadata(session: Session, system: TrackingSystem, data:
     if problem:
         logger.warning(
             f"Session '{session.session_id}': {system.value} not exported: metadata does not "
-            f"mark it enabled ({problem}); {data} stay only in sourcedata/"
+            f"mark it enabled ({problem}); {data}"
         )
     else:
         logger.info(
             f"Session '{session.session_id}': {system.value} not exported: {key} is false in "
-            f"the metadata; {data} stay only in sourcedata/"
+            f"the metadata; {data}"
+        )
+
+
+def _names(columns: list[str], limit: int = 10) -> str:
+    """Up to *limit* column names, comma-separated, with the number left out."""
+    text = ", ".join(columns[:limit])
+    return text + (f", ... ({len(columns) - limit} more)" if len(columns) > limit else "")
+
+
+def _report_unrouted_columns(
+    sid: str, all_columns: list[str], alternate_time_columns: dict[str, str] | None
+) -> None:
+    """Report continuous-data columns that no stream takes.
+
+    One WARNING for columns with no tracking-system prefix and for Face-prefixed
+    columns (Face is read only from the face file); INFO for the template's
+    ``Custom_`` transform columns. All of them stay in sourcedata/.
+    """
+    face_prefixes = tuple(SYSTEM_COLUMN_PREFIXES[TrackingSystem.FACE])
+    stream_prefixes = tuple(
+        prefix
+        for system, prefixes in SYSTEM_COLUMN_PREFIXES.items()
+        if system != TrackingSystem.FACE
+        for prefix in prefixes
+    )
+    clocks = set((alternate_time_columns or {}).values())
+    unknown, face, custom = [], [], []
+    for column in all_columns:
+        if column == "timestamp" or column in clocks or column.startswith(stream_prefixes):
+            continue
+        if column.startswith("Custom_"):
+            custom.append(column)
+        elif column.startswith(face_prefixes):
+            face.append(column)
+        else:
+            unknown.append(column)
+
+    if unknown or face:
+        parts = []
+        if unknown:
+            parts.append(f"{len(unknown)} match no tracking-system prefix ({_names(unknown)})")
+        if face:
+            parts.append(
+                f"{len(face)} have a Face prefix, but Face is read only from the face file "
+                f"({_names(face)})"
+            )
+        logger.warning(
+            f"Session '{sid}': {len(unknown) + len(face)} column(s) of the continuous data are "
+            f"not exported to BIDS (they stay in sourcedata/): {'; '.join(parts)}"
+        )
+    if custom:
+        logger.info(
+            f"Session '{sid}': {len(custom)} Custom_ column(s) (custom transforms) are not "
+            f"exported to BIDS motion files; they stay in sourcedata/ ({_names(custom)})"
         )
 
 
@@ -161,7 +215,9 @@ def split_continuous_data(
         # Check if system was enabled during recording
         if not is_system_enabled(system, session.metadata):
             if n_data:
-                _log_not_enabled_in_metadata(session, system, f"its {n_data} columns")
+                _log_not_enabled_in_metadata(
+                    session, system, f"its {n_data} columns stay only in sourcedata/"
+                )
             else:
                 logger.debug(f"Skipping {system.value} (not enabled during recording)")
             continue
@@ -217,6 +273,8 @@ def split_continuous_data(
         streams[system] = stream
         logger.info(f"Split {system.value}: {len(system_df)} rows, {len(data_cols)} channels")
 
+    _report_unrouted_columns(sid, all_columns, alternate_time_columns)
+
     # Handle Face data from separate file
     face_in_config = enabled_systems is None or enabled_systems.get("Face", True)
     if session.raw_face_data is not None and not face_in_config:
@@ -225,7 +283,9 @@ def split_continuous_data(
             "(systems.Face.enabled); the face file stays only in sourcedata/"
         )
     elif session.raw_face_data is not None and not session.metadata.face_enabled:
-        _log_not_enabled_in_metadata(session, TrackingSystem.FACE, "the face file")
+        _log_not_enabled_in_metadata(
+            session, TrackingSystem.FACE, "the face file stays only in sourcedata/"
+        )
     elif session.raw_face_data is None and face_in_config and session.metadata.face_enabled:
         logger.warning(
             f"Session '{sid}': Face not exported: face_enabled is true but no face file was "

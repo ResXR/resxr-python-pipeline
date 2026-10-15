@@ -226,7 +226,8 @@ class TestDroppedStreamsAreReported:
             session_id="test",
             flag_problems={"hands_enabled": "hands_enabled missing"},
         )
-        result = self._split(_make_session(metadata, continuous_df), caplog)
+        template_like = continuous_df.drop(columns=["Eyes_Closed_L", "Eyes_Closed_R"])
+        result = self._split(_make_session(metadata, template_like), caplog)
         assert set(result) == {TrackingSystem.HEAD}
         assert (
             "Session 'test': Hands not exported: metadata does not mark it enabled "
@@ -277,7 +278,44 @@ class TestDroppedStreamsAreReported:
     def test_valid_session_has_no_warning(self, session_metadata, continuous_df, caplog):
         from tests.conftest import _face_df
 
-        session = _make_session(session_metadata, continuous_df)
+        template_like = continuous_df.drop(columns=["Eyes_Closed_L", "Eyes_Closed_R"])
+        session = _make_session(session_metadata, template_like)
         session.raw_face_data = _face_df()
         self._split(session, caplog)
         assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+    def test_columns_no_stream_takes_are_listed_in_one_warning(
+        self, session_metadata, continuous_df, caplog
+    ):
+        extra = continuous_df.assign(
+            Pupil_Left_Diameter=3.1,
+            EDA_uS=0.5,
+            Custom_Cube_px=0.0,
+            Node_Head_Time=continuous_df["timestamp"],
+        )
+        result = self._split(
+            _make_session(session_metadata, extra),
+            caplog,
+            alternate_time_columns={"Head": "Node_Head_Time"},
+        )
+        warnings = [r.getMessage() for r in caplog.records if "column(s) of" in r.getMessage()]
+        assert warnings == [
+            "Session 'test': 4 column(s) of the continuous data are not exported to BIDS "
+            "(they stay in sourcedata/): 2 match no tracking-system prefix "
+            "(Pupil_Left_Diameter, EDA_uS); 2 have a Face prefix, but Face is read only from "
+            "the face file (Eyes_Closed_L, Eyes_Closed_R)"
+        ]
+        assert (
+            "Session 'test': 1 Custom_ column(s) (custom transforms) are not exported to BIDS "
+            "motion files; they stay in sourcedata/ (Custom_Cube_px)"
+        ) in caplog.text
+        for stream in result.values():  # routing is unchanged
+            assert "Pupil_Left_Diameter" not in stream.data.columns
+
+    def test_long_column_lists_are_cut_at_ten_names(self, session_metadata, continuous_df, caplog):
+        extra = continuous_df.drop(columns=["Eyes_Closed_L", "Eyes_Closed_R"]).assign(
+            **{f"Lab_{i:02d}": 0.0 for i in range(12)}
+        )
+        self._split(_make_session(session_metadata, extra), caplog)
+        assert "12 match no tracking-system prefix (Lab_00, " in caplog.text
+        assert "Lab_09, ... (2 more))" in caplog.text
