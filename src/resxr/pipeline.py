@@ -17,6 +17,8 @@ BIDS output (``write_bids_output``):
 
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -33,9 +35,9 @@ from .bids.metadata import (
 )
 from .core.config import PipelineConfig, SessionMapping
 from .core.constants import TrackingSystem
-from .core.exceptions import ConfigurationError, ResXRError
+from .core.exceptions import ConfigurationError, DataLoadError, ResXRError
 from .core.logger import get_logger
-from .core.session import Session
+from .core.session import CheckNotRun, Session
 from .io.readers import discover_sessions, load_session
 from .io.splitter import split_continuous_data
 from .io.writers import (
@@ -97,14 +99,79 @@ def validate_config(config: PipelineConfig) -> None:
         raise ConfigurationError("; ".join(problems))
 
 
-def run(config_path: str = "config/pipeline_config.yaml") -> None:
+@dataclass
+class SessionOutcome:
+    """What happened to one session of a run."""
+
+    source_dir: str
+    subject_id: str
+    session_label: str
+    processed: bool
+    reason: str = ""  # why a skipped session was skipped
+    warnings: int = 0  # WARNING messages logged while processing the session
+    errors: int = 0  # ERROR messages logged while processing the session
+    checks_not_run: list[CheckNotRun] = field(default_factory=list)
+
+
+@dataclass
+class RunResult:
+    """Outcome of :func:`run`: one entry per session found."""
+
+    output_dir: Path
+    sessions: list[SessionOutcome] = field(default_factory=list)
+
+    @property
+    def processed(self) -> list[SessionOutcome]:
+        return [s for s in self.sessions if s.processed]
+
+    @property
+    def skipped(self) -> list[SessionOutcome]:
+        return [s for s in self.sessions if not s.processed]
+
+    @property
+    def exit_code(self) -> int:
+        """0 when every session found was processed; 1 when one was skipped or none found."""
+        return 0 if self.sessions and not self.skipped else 1
+
+
+class _MessageCounter(logging.Handler):
+    """Counts the WARNING and ERROR records that reach the ``resxr`` logger."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.WARNING)
+        self.warnings = 0
+        self.errors = 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.levelno >= logging.ERROR:
+            self.errors += 1
+        else:
+            self.warnings += 1
+
+
+def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
     """
     Run the complete ResXR pipeline.
+
+    A session that cannot be processed is logged as an error and skipped; the
+    run continues with the others and ends with a summary of every session.
 
     Parameters
     ----------
     config_path : str
         Path to YAML configuration file
+
+    Returns
+    -------
+    RunResult
+        The processed and skipped sessions; ``exit_code`` is 0 only when every
+        session found was processed. Warning counts include only messages at or
+        above the ``resxr`` logger's level (none in the CLI's ``--quiet`` mode).
+
+    Raises
+    ------
+    ConfigurationError
+        If the configuration is invalid (before any session is read).
     """
     # Load and check the configuration before any session is processed
     config = PipelineConfig.from_yaml(Path(config_path))
@@ -119,59 +186,113 @@ def run(config_path: str = "config/pipeline_config.yaml") -> None:
     # Get enabled systems from config
     enabled_systems = {name: cfg.enabled for name, cfg in config.systems.items()}
 
-    # Process sessions based on mappings
-    processed_subjects = []
-
     if config.session_mappings:
-        # Use explicit mappings
-        for mapping in config.session_mappings:
-            try:
-                session = process_session_from_mapping(mapping, config, bids, enabled_systems)
-                if session:
-                    processed_subjects.append(
-                        {
-                            "participant_id": f"sub-{session.subject_id}",
-                            "age": mapping.age if mapping.age is not None else "n/a",
-                            "sex": mapping.sex if mapping.sex is not None else "n/a",
-                            "handedness": mapping.handedness
-                            if mapping.handedness is not None
-                            else "n/a",
-                        }
-                    )
-            except ResXRError as e:
-                logger.error(f"Failed to process {mapping.source_dir}: {e}")
+        mappings = list(config.session_mappings)
     else:
         # Auto-discover sessions
         logger.info("No session mappings provided, discovering sessions...")
         session_dirs = discover_sessions(config.input)
-
-        for i, session_dir in enumerate(session_dirs):
-            mapping = SessionMapping(
-                source_dir=str(session_dir),
-                subject_id=f"{i + 1:02d}",
-                session_label="01",
+        mappings = [
+            SessionMapping(
+                source_dir=str(session_dir), subject_id=f"{i + 1:02d}", session_label="01"
             )
-            try:
-                session = process_session_from_mapping(mapping, config, bids, enabled_systems)
-                if session:
-                    processed_subjects.append(
-                        {
-                            "participant_id": f"sub-{session.subject_id}",
-                            "age": mapping.age if mapping.age is not None else "n/a",
-                            "sex": mapping.sex if mapping.sex is not None else "n/a",
-                            "handedness": mapping.handedness
-                            if mapping.handedness is not None
-                            else "n/a",
-                        }
-                    )
-            except ResXRError as e:
-                logger.error(f"Failed to process {session_dir}: {e}")
+            for i, session_dir in enumerate(session_dirs)
+        ]
+        if not mappings:
+            _log_no_sessions_found(config)
+
+    result = RunResult(output_dir=config.output.bids_root)
+    processed_subjects = []
+    resxr_logger = logging.getLogger("resxr")
+    for mapping in mappings:
+        outcome = SessionOutcome(
+            source_dir=mapping.source_dir,
+            subject_id=mapping.subject_id,
+            session_label=mapping.session_label,
+            processed=False,
+        )
+        counter = _MessageCounter()
+        resxr_logger.addHandler(counter)
+        try:
+            session = process_session_from_mapping(mapping, config, bids, enabled_systems)
+            outcome.processed = True
+            outcome.checks_not_run = list(session.checks_not_run)
+            processed_subjects.append(
+                {
+                    "participant_id": f"sub-{session.subject_id}",
+                    "age": mapping.age if mapping.age is not None else "n/a",
+                    "sex": mapping.sex if mapping.sex is not None else "n/a",
+                    "handedness": mapping.handedness if mapping.handedness is not None else "n/a",
+                }
+            )
+        except ResXRError as e:
+            outcome.reason = str(e)
+        finally:
+            resxr_logger.removeHandler(counter)
+        outcome.warnings, outcome.errors = counter.warnings, counter.errors
+        if not outcome.processed:
+            logger.error(f"Failed to process {mapping.source_dir}: {outcome.reason}")
+        result.sessions.append(outcome)
 
     # Write dataset-level files only if at least one session succeeded
     if processed_subjects:
         write_dataset_files(config, bids, processed_subjects)
 
+    log_run_summary(result)
     logger.info(f"Pipeline complete. Output at: {config.output.bids_root}")
+    return result
+
+
+def _log_no_sessions_found(config: PipelineConfig) -> None:
+    """ERROR for auto-discovery that found nothing, naming nested candidates."""
+    data_dir = config.input.data_dir
+    pattern = config.input.metadata_pattern
+    nested = sorted({p.parent for p in data_dir.rglob(pattern)})
+    hint = ""
+    if nested:
+        shown = ", ".join(str(p) for p in nested[:3])
+        more = f" and {len(nested) - 3} more" if len(nested) > 3 else ""
+        hint = (
+            f" {len(nested)} deeper folder(s) contain one ({shown}{more}); "
+            "list them under session_mappings."
+        )
+    logger.error(
+        f"No sessions found under {data_dir}: without session_mappings, only direct "
+        f"subfolders that contain a file matching '{pattern}' are sessions.{hint}"
+    )
+
+
+def log_run_summary(result: RunResult) -> None:
+    """Log one line per session: processed (warnings, checks not run) or skipped (reason).
+
+    The level is ERROR when no session was processed, WARNING when a session was
+    skipped or a check did not run, and INFO otherwise.
+    """
+    processed, skipped = result.processed, result.skipped
+    if not processed:
+        level = logging.ERROR
+    elif skipped or any(s.checks_not_run for s in processed):
+        level = logging.WARNING
+    else:
+        level = logging.INFO
+
+    logger.log(
+        level,
+        f"Run summary: {len(result.sessions)} session(s) found, {len(processed)} processed, "
+        f"{len(skipped)} skipped.",
+    )
+    for s in result.sessions:
+        target = f"sub-{s.subject_id} ses-{s.session_label}"
+        if not s.processed:
+            logger.log(level, f"  skipped {s.source_dir} ({target}): {s.reason}")
+            continue
+        line = (
+            f"  processed {s.source_dir} ({target}): {s.warnings} warning(s), {s.errors} error(s)"
+        )
+        if s.checks_not_run:
+            not_run = "; ".join(f"{c.check} on {c.stream}: {c.reason}" for c in s.checks_not_run)
+            line += f"; checks not run: {not_run}"
+        logger.log(level, line)
 
 
 def process_session_from_mapping(
@@ -179,7 +300,7 @@ def process_session_from_mapping(
     config: PipelineConfig,
     bids: BIDSLayout,
     enabled_systems: dict[str, bool],
-) -> Session | None:
+) -> Session:
     """
     Process a single session based on a mapping.
 
@@ -196,8 +317,13 @@ def process_session_from_mapping(
 
     Returns
     -------
-    Optional[Session]
-        Processed session or None if failed
+    Session
+        The processed session
+
+    Raises
+    ------
+    ResXRError
+        When the session cannot be processed; the caller logs it and skips it.
     """
     # Resolve session directory
     source_dir = mapping.source_dir
@@ -228,8 +354,11 @@ def process_session_from_mapping(
     logger.info(f"Split into {len(session.streams)} tracking streams")
 
     if not session.streams:
-        logger.warning(f"No valid streams found in {source_dir}")
-        return None
+        if session.raw_continuous_data is None or session.raw_continuous_data.empty:
+            why = "the continuous data file has no data rows"
+        else:
+            why = "no enabled tracking system has data columns (see the messages above)"
+        raise DataLoadError(f"No tracking stream to export from {source_dir}: {why}")
 
     session.initialize_motion_time_zero()
 

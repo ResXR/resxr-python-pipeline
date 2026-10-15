@@ -904,3 +904,155 @@ def test_hand_joint_channels_carry_the_detected_frame(tmp_path, minimal_config_d
         (head_json,) = motion_dir.glob("*_tracksys-Head_channels.json")
         head_sidecar = json.loads(head_json.read_text(encoding="utf-8"))
         assert set(head_sidecar["reference_frame"]["Levels"]) == {"global"}
+
+
+# ── Run outcome: end-of-run summary and exit code ───────────────────
+
+
+def _write_clocked_session_dir(data_dir: Path, name: str, *, session_id: str) -> Path:
+    """A valid session with per-system clocks, so every timing check can run."""
+    session_dir = _write_session_dir(data_dir, name, session_id=session_id)
+    _edit_continuous(
+        session_dir,
+        lambda df: df.assign(
+            Node_Head_Time=df["timeSinceStartup"] + 50.0,
+            Node_HandLeft_Time=df["timeSinceStartup"] + 100.0,
+        ),
+    )
+    return session_dir
+
+
+def _two_session_config(tmp_path, minimal_config_dict, *, second="sess_b"):
+    data_dir = tmp_path / "sessions"
+    _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
+    if second == "sess_b":
+        _write_clocked_session_dir(data_dir, "sess_b", session_id="B")
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    return data_dir, _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=[
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+            {"source_dir": second, "subject_id": "02", "session_label": "01"},
+        ],
+    )
+
+
+def test_run_returns_every_session_and_exit_code_0_when_all_processed(
+    tmp_path, minimal_config_dict, caplog
+):
+    from resxr.cli import main
+
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [(s.subject_id, s.processed) for s in result.sessions] == [("01", True), ("02", True)]
+    assert result.exit_code == 0
+    summary = [r for r in caplog.records if r.getMessage().startswith("Run summary:")]
+    assert [r.levelname for r in summary] == ["INFO"]
+    assert summary[0].getMessage() == "Run summary: 2 session(s) found, 2 processed, 0 skipped."
+    assert "  processed sess_a (sub-01 ses-01): 0 warning(s), 0 error(s)" in caplog.text
+    assert main(["-c", str(cfg)]) == 0
+
+
+def test_a_skipped_session_gives_a_warning_summary_and_exit_code_1(
+    tmp_path, minimal_config_dict, caplog
+):
+    from resxr.cli import main
+
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict, second="sess_missing")
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [True, False]
+    assert "Session directory not found" in result.skipped[0].reason
+    assert result.exit_code == 1
+    summary = [r for r in caplog.records if r.getMessage().startswith("Run summary:")]
+    assert [r.levelname for r in summary] == ["WARNING"]
+    assert "Run summary: 2 session(s) found, 1 processed, 1 skipped." in caplog.text
+    assert "  skipped sess_missing (sub-02 ses-01): Session directory not found" in caplog.text
+    assert main(["-c", str(cfg)]) == 1
+
+
+def test_every_session_failing_gives_an_error_summary_and_exit_code_1(
+    tmp_path, minimal_config_dict, caplog
+):
+    from resxr.cli import main
+
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    for name in ("sess_a", "sess_b"):
+        (data_dir / name / "session_metadata.json").unlink()
+    assert main(["-c", str(cfg)]) == 1
+    summary = [r for r in caplog.records if r.getMessage().startswith("Run summary:")]
+    assert [r.levelname for r in summary] == ["ERROR"]
+    assert "Run summary: 2 session(s) found, 0 processed, 2 skipped." in caplog.text
+    assert not (tmp_path / "bids_out" / "dataset_description.json").exists()
+
+
+def test_checks_not_run_appear_in_the_summary(tmp_path, minimal_config_dict, caplog):
+    data_dir = tmp_path / "sessions"
+    session_dir = _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
+    _edit_continuous(session_dir, lambda df: df.drop(columns="RightHand_Status_HandTracked"))
+    minimal_config_dict["validation"]["enabled_checks"] = ["hands_tracking_loss"]
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=[{"source_dir": "sess_a", "subject_id": "01", "session_label": "01"}],
+    )
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert result.exit_code == 0  # the session was processed; the gap is reported
+    (outcome,) = result.sessions
+    assert outcome.warnings >= 1
+    assert [c.check for c in outcome.checks_not_run] == ["hands_tracking_loss"]
+    summary = [r for r in caplog.records if r.getMessage().startswith("Run summary:")]
+    assert [r.levelname for r in summary] == ["WARNING"]
+    assert (
+        "checks not run: hands_tracking_loss on Hands: right_hand: column "
+        "RightHand_Status_HandTracked missing"
+    ) in caplog.text
+
+
+def test_nested_sessions_without_mappings_are_an_error_with_exit_code_1(
+    tmp_path, minimal_config_dict, caplog
+):
+    from resxr.cli import main
+
+    data_dir = tmp_path / "DATA"
+    _write_session_dir(data_dir / "Project" / "Task", "sess_a", session_id="A")
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=[],
+    )
+    assert main(["-c", str(cfg)]) == 1
+    assert f"No sessions found under {data_dir}: without session_mappings" in caplog.text
+    assert "1 deeper folder(s) contain one" in caplog.text
+    assert str(data_dir / "Project" / "Task" / "sess_a") in caplog.text
+    assert "Run summary: 0 session(s) found, 0 processed, 0 skipped." in caplog.text
+
+
+def test_header_only_continuous_file_skips_the_session_with_an_error(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_continuous(data_dir / "sess_a", lambda df: df.iloc[:0])
+    result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert (
+        "Failed to process sess_a: No tracking stream to export from "
+        f"{data_dir / 'sess_a'}: the continuous data file has no data rows"
+    ) in caplog.text
+    assert result.exit_code == 1

@@ -29,6 +29,9 @@ Examples:
   resxr --config my_config.yaml --dry-run
   resxr --version
 
+Exit status: 0 when every session was processed; 1 when a session was
+skipped, no session was found, or the configuration is invalid.
+
 For more information, see: https://github.com/ResXR/ResXR
         """,
     )
@@ -85,7 +88,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     Returns
     -------
     int
-        Exit code (0 for success, non-zero for errors)
+        Exit code: 0 when every session found was processed; 1 when a session
+        was skipped, no session was found, or the configuration is invalid;
+        130 when interrupted.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -129,10 +134,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             logger.error(f"Configuration error: {e}")
             return 1
 
-    # Run pipeline
+    # Run pipeline: exit 1 when a session was skipped or no session was found
     try:
-        pipeline.run(config_path=str(config_path))
-        return 0
+        result = pipeline.run(config_path=str(config_path))
+        return result.exit_code
     except KeyboardInterrupt:
         logger.info("Pipeline interrupted by user")
         return 130
