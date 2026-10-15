@@ -21,15 +21,17 @@ from pydantic import (
 )
 
 from .exceptions import ConfigurationError
-from .logger import get_logger
-
-_config_logger = get_logger(__name__)
 
 
 class ConfigModel(BaseModel):
-    """Base model for pipeline configuration objects."""
+    """Base model for pipeline configuration objects.
 
-    model_config = ConfigDict(extra="ignore")
+    Unknown keys are an error at every level, so a misspelled key cannot be
+    ignored without a message. Dict fields with free keys (such as
+    ``validation.settings``) are not models and are not affected.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class InputConfig(ConfigModel):
@@ -229,7 +231,8 @@ class PipelineConfig(ConfigModel):
         Raises
         ------
         ConfigurationError
-            If the file cannot be read, parsed, or is missing required fields
+            If the file cannot be read or parsed, is missing required fields,
+            or has a key that the configuration does not define (at any level)
         """
         path = Path(path)
         if not path.exists():
@@ -245,20 +248,18 @@ class PipelineConfig(ConfigModel):
         if not data:
             raise ConfigurationError("Empty configuration")
 
-        known_keys = set(cls.model_fields.keys())
-        if isinstance(data, dict):
-            unknown = sorted(set(data.keys()) - known_keys)
-            if unknown:
-                _config_logger.warning(
-                    "Unknown top-level config keys (ignored): %s. Check for typos. Known keys: %s",
-                    unknown,
-                    sorted(known_keys),
-                )
-
         try:
             return cls.model_validate(data)
         except ValidationError as e:
-            raise ConfigurationError(str(e)) from e
+            message = str(e)
+            if isinstance(data, dict):
+                unknown = sorted(str(key) for key in data if key not in cls.model_fields)
+                if unknown:
+                    message += (
+                        f"\nUnknown top-level key(s) {unknown}; check for typos. "
+                        f"Known top-level keys: {sorted(cls.model_fields)}"
+                    )
+            raise ConfigurationError(message) from e
 
     def is_system_enabled(self, system_name: str) -> bool:
         """Check if a tracking system is enabled in config."""

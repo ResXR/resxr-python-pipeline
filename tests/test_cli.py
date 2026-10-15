@@ -129,6 +129,16 @@ class TestMainDryRun:
         assert "Configuration error: " in caplog.text
         assert _MASKING_NOT_ENABLED.format(names="['eyes_closed']") in caplog.text
 
+    def test_dry_run_rejects_an_unknown_nested_key(self, tmp_path, minimal_config_dict, caplog):
+        minimal_config_dict["preprocessing"]["apply_quality_maskin"] = True
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert "Configuration error: " in caplog.text
+        assert "preprocessing.apply_quality_maskin\n  Extra inputs are not permitted" in (
+            caplog.text
+        )
+
 
 # ---------------------------------------------------------------------------
 # main() — configuration errors stop the run before any session
@@ -168,6 +178,14 @@ class TestMainConfigErrors:
                     apply_quality_masking=True, masking_checks=["hands_tracking_loss"]
                 ),
                 _MASKING_NOT_ENABLED.format(names="['hands_tracking_loss']"),
+            ),
+            (
+                lambda cfg: cfg["preprocessing"].update(apply_quality_maskin=True),
+                "preprocessing.apply_quality_maskin\n  Extra inputs are not permitted",
+            ),
+            (
+                lambda cfg: cfg.update(outputs={"bids_root": "elsewhere"}),
+                "Unknown top-level key(s) ['outputs']; check for typos. Known top-level keys: ",
             ),
         ],
     )
