@@ -247,6 +247,10 @@ class SessionMetadata:
     eyes_enabled: bool = False
     controllers_enabled: bool = False
 
+    # Flags that were absent or not true/false in the file and so read as False
+    # (key -> reason, e.g. "hands_enabled missing"); used to explain dropped streams.
+    flag_problems: dict[str, str] = field(default_factory=dict)
+
     # Number of columns allocated in the CSV schema at session start (a
     # compile-time constant, not a live device measurement). Kept for
     # provenance; surfaced only in sourcedata, not in BIDS sidecars.

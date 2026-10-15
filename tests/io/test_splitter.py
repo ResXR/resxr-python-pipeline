@@ -201,3 +201,83 @@ class TestSplitContinuousData:
         incomplete_freqs = {"Eyes": 90.0}  # missing Head, Hands
         with pytest.raises(ConfigurationError, match="sampling_frequencies"):
             split_continuous_data(session, None, incomplete_freqs)
+
+
+# ===========================================================================
+# Streams that are not exported say why
+# ===========================================================================
+
+
+class TestDroppedStreamsAreReported:
+    @staticmethod
+    def _split(session, caplog, enabled_systems=None, alternate_time_columns=None):
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            return split_continuous_data(
+                session,
+                enabled_systems,
+                SAMPLING_FREQS,
+                alternate_time_columns=alternate_time_columns,
+            )
+
+    def test_missing_enabled_key_warns_per_dropped_stream(self, continuous_df, caplog):
+        metadata = SessionMetadata(
+            session_id="test",
+            flag_problems={"hands_enabled": "hands_enabled missing"},
+        )
+        result = self._split(_make_session(metadata, continuous_df), caplog)
+        assert set(result) == {TrackingSystem.HEAD}
+        assert (
+            "Session 'test': Hands not exported: metadata does not mark it enabled "
+            "(hands_enabled missing); its 4 columns stay only in sourcedata/"
+        ) in caplog.text
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1  # Eyes is false without a problem note: INFO, not WARNING
+        assert "Eyes not exported: eyes_enabled is false in the metadata" in caplog.text
+
+    def test_enabled_stream_without_columns_warns(self, session_metadata, continuous_df, caplog):
+        no_eyes = continuous_df.drop(columns=["LeftEye_px", "LeftEye_py"])
+        result = self._split(_make_session(session_metadata, no_eyes), caplog)
+        assert TrackingSystem.EYES not in result
+        assert (
+            "Session 'test': Eyes enabled in metadata but no Eyes columns found; Eyes not exported"
+        ) in caplog.text
+
+    def test_system_disabled_in_config_with_data_is_info(
+        self, session_metadata, continuous_df, caplog
+    ):
+        self._split(_make_session(session_metadata, continuous_df), caplog, {"Hands": False})
+        (record,) = [r for r in caplog.records if "Hands not exported" in r.getMessage()]
+        assert record.levelname == "INFO"
+        assert "disabled in the config (systems.Hands.enabled)" in record.getMessage()
+
+    def test_face_enabled_without_face_file_warns_with_both_consequences(
+        self, session_metadata, continuous_df, caplog
+    ):
+        result = self._split(_make_session(session_metadata, continuous_df), caplog)
+        assert TrackingSystem.FACE not in result
+        assert (
+            "Session 'test': Face not exported: face_enabled is true but no face file was loaded"
+        ) in caplog.text
+        assert "the eyes_closed check needs the Face stream and will not run" in caplog.text
+
+    def test_missing_clock_column_warns(self, session_metadata, continuous_df, caplog):
+        self._split(
+            _make_session(session_metadata, continuous_df),
+            caplog,
+            alternate_time_columns={"Hands": "Node_HandLeft_Time"},
+        )
+        assert (
+            "Session 'test': clock column 'Node_HandLeft_Time' for Hands "
+            "(preprocessing.alternate_time_columns) not found in the continuous data; Hands "
+            "is timed by timeSinceStartup alone"
+        ) in caplog.text
+
+    def test_valid_session_has_no_warning(self, session_metadata, continuous_df, caplog):
+        from tests.conftest import _face_df
+
+        session = _make_session(session_metadata, continuous_df)
+        session.raw_face_data = _face_df()
+        self._split(session, caplog)
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]

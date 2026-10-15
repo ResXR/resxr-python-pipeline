@@ -152,6 +152,64 @@ class TestLoadSessionMetadata:
         assert meta.face_enabled is False
         assert meta.body_enabled is False
         assert meta.controllers_enabled is False
+        assert meta.flag_problems["hands_enabled"] == "hands_enabled missing"
+
+
+class TestSessionMetadataDepartures:
+    """Metadata that departs from the contract is converted or read with a WARNING."""
+
+    @staticmethod
+    def _load(tmp_path, data, caplog):
+        import logging
+
+        path = tmp_path / "x_SessionMetadata.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            return path, load_session_metadata(path)
+
+    def test_true_false_strings_are_converted_with_a_warning(self, tmp_path, caplog):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02}
+        data.update(hands_enabled="false", eyes_enabled="TRUE", face_enabled=True)
+        path, meta = self._load(tmp_path, data, caplog)
+        assert meta.hands_enabled is False
+        assert meta.eyes_enabled is True
+        assert meta.face_enabled is True
+        assert f"{path}: hands_enabled is the string 'false'; read as false." in caplog.text
+        assert f"{path}: eyes_enabled is the string 'TRUE'; read as true." in caplog.text
+        assert "hands_enabled" not in meta.flag_problems
+
+    @pytest.mark.parametrize("value", ["no", 1, None, "yes"])
+    def test_other_values_read_as_false_with_a_warning(self, tmp_path, caplog, value):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02, "eyes_enabled": value}
+        path, meta = self._load(tmp_path, data, caplog)
+        assert meta.eyes_enabled is False
+        assert f"{path}: eyes_enabled is {value!r}, not true or false; read as false." in (
+            caplog.text
+        )
+        assert meta.flag_problems["eyes_enabled"] == f"eyes_enabled is {value!r}, not true or false"
+
+    def test_missing_session_id_warns_with_its_consequences(self, tmp_path, caplog):
+        path, meta = self._load(tmp_path, {"fixedDeltaTime": 0.02}, caplog)
+        assert meta.session_id == "unknown"
+        assert (
+            f"{path} has no session_id; using 'unknown': custom tables are read only from a "
+            "folder named 'unknown_CustomTables' and the report is named unknown_report.html"
+        ) in caplog.text
+
+    def test_unparseable_utc_names_the_file_and_the_consequence(self, tmp_path, caplog):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02, "utc_start_iso8601": "10/06/2026"}
+        path, meta = self._load(tmp_path, data, caplog)
+        assert meta.utc_start is None
+        assert (
+            f"Could not parse UTC timestamp: '10/06/2026' (utc_start_iso8601 in {path}); "
+            "scans.tsv acq_time is n/a"
+        ) in caplog.text
+
+    def test_metadata_that_is_not_an_object_is_a_load_error(self, tmp_path):
+        path = tmp_path / "x_SessionMetadata.json"
+        path.write_text("[1, 2]", encoding="utf-8")
+        with pytest.raises(DataLoadError, match="must hold a JSON object"):
+            load_session_metadata(path)
 
 
 # ===========================================================================

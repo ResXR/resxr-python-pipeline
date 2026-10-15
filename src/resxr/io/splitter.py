@@ -61,6 +61,45 @@ def is_system_enabled(system: TrackingSystem, metadata: SessionMetadata) -> bool
     return mapping.get(system, True)
 
 
+_ENABLED_KEYS = {
+    TrackingSystem.EYES: "eyes_enabled",
+    TrackingSystem.HANDS: "hands_enabled",
+    TrackingSystem.FACE: "face_enabled",
+    TrackingSystem.BODY: "body_enabled",
+    TrackingSystem.CONTROLLERS: "controllers_enabled",
+}
+
+
+def _log_not_enabled_in_metadata(session: Session, system: TrackingSystem, data: str) -> None:
+    """Explain a stream with data that the metadata does not enable.
+
+    WARNING when the flag was missing or not true/false (a departure from the
+    input contract), INFO when the metadata says false.
+    """
+    key = _ENABLED_KEYS[system]
+    problem = session.metadata.flag_problems.get(key)
+    if problem:
+        logger.warning(
+            f"Session '{session.session_id}': {system.value} not exported: metadata does not "
+            f"mark it enabled ({problem}); {data} stay only in sourcedata/"
+        )
+    else:
+        logger.info(
+            f"Session '{session.session_id}': {system.value} not exported: {key} is false in "
+            f"the metadata; {data} stay only in sourcedata/"
+        )
+
+
+def _warn_clock_column_missing(sid: str, system: str, column: str, source: str) -> None:
+    """A configured per-system clock column is absent, so the stream uses timeSinceStartup."""
+    logger.warning(
+        f"Session '{sid}': clock column '{column}' for {system} "
+        f"(preprocessing.alternate_time_columns) not found in the {source}; {system} is "
+        "timed by timeSinceStartup alone, and the checks that need a separate "
+        "timeSinceStartup column will not run on it"
+    )
+
+
 def split_continuous_data(
     session: Session,
     enabled_systems: dict[str, bool] | None,
@@ -87,9 +126,10 @@ def split_continuous_data(
     Dict[TrackingSystem, TrackingStream]
         Mapping of tracking systems to their data streams
     """
+    sid = session.session_id
     df = session.raw_continuous_data
     if df is None or df.empty:
-        logger.warning("No continuous data to split")
+        logger.warning(f"No continuous data to split (session '{sid}')")
         return {}
 
     all_columns = df.columns.tolist()
@@ -100,25 +140,49 @@ def split_continuous_data(
         if system == TrackingSystem.FACE:
             continue
 
-        # Check if system is enabled in config
-        if enabled_systems is not None and not enabled_systems.get(system.value, True):
-            logger.debug(f"Skipping {system.value} (disabled in config)")
-            continue
-
-        # Check if system was enabled during recording
-        if not is_system_enabled(system, session.metadata):
-            logger.debug(f"Skipping {system.value} (not enabled during recording)")
-            continue
-
         # Get columns for this system
         cols = get_columns_for_system(
             all_columns, system, alternate_time_columns=alternate_time_columns
         )
+        n_data = len(cols) - 1
+
+        # Check if system is enabled in config
+        if enabled_systems is not None and not enabled_systems.get(system.value, True):
+            if n_data:
+                logger.info(
+                    f"Session '{sid}': {system.value} not exported: disabled in the config "
+                    f"(systems.{system.value}.enabled); its {n_data} columns stay only in "
+                    "sourcedata/"
+                )
+            else:
+                logger.debug(f"Skipping {system.value} (disabled in config)")
+            continue
+
+        # Check if system was enabled during recording
+        if not is_system_enabled(system, session.metadata):
+            if n_data:
+                _log_not_enabled_in_metadata(session, system, f"its {n_data} columns")
+            else:
+                logger.debug(f"Skipping {system.value} (not enabled during recording)")
+            continue
 
         # Skip if only timestamp column
-        if len(cols) <= 1:
-            logger.debug(f"Skipping {system.value} (no data columns)")
+        if n_data < 1:
+            if system == TrackingSystem.HEAD:
+                logger.warning(
+                    f"Session '{sid}': no Head columns found in the continuous data; "
+                    "Head not exported"
+                )
+            else:
+                logger.warning(
+                    f"Session '{sid}': {system.value} enabled in metadata but no "
+                    f"{system.value} columns found; {system.value} not exported"
+                )
             continue
+
+        clock = (alternate_time_columns or {}).get(system.value)
+        if clock and clock not in all_columns:
+            _warn_clock_column_missing(sid, system.value, clock, "continuous data")
 
         # Extract system data
         system_df = df[cols].copy()
@@ -154,6 +218,23 @@ def split_continuous_data(
         logger.info(f"Split {system.value}: {len(system_df)} rows, {len(data_cols)} channels")
 
     # Handle Face data from separate file
+    face_in_config = enabled_systems is None or enabled_systems.get("Face", True)
+    if session.raw_face_data is not None and not face_in_config:
+        logger.info(
+            f"Session '{sid}': Face not exported: disabled in the config "
+            "(systems.Face.enabled); the face file stays only in sourcedata/"
+        )
+    elif session.raw_face_data is not None and not session.metadata.face_enabled:
+        _log_not_enabled_in_metadata(session, TrackingSystem.FACE, "the face file")
+    elif session.raw_face_data is None and face_in_config and session.metadata.face_enabled:
+        logger.warning(
+            f"Session '{sid}': Face not exported: face_enabled is true but no face file was "
+            "loaded (none matches input.face_data_pattern, or it could not be read); the "
+            "eyes_closed check needs the Face stream and will not run"
+        )
+    elif session.raw_face_data is not None and session.raw_face_data.empty and face_in_config:
+        logger.warning(f"Session '{sid}': Face not exported: the face file has no data rows")
+
     if (
         session.raw_face_data is not None
         and (enabled_systems is None or enabled_systems.get("Face", True))
@@ -165,6 +246,8 @@ def split_continuous_data(
             # Use alternate time column if configured
             if alternate_time_columns:
                 alt_time_col = alternate_time_columns.get("Face")
+                if alt_time_col and alt_time_col not in face_df.columns:
+                    _warn_clock_column_missing(sid, "Face", alt_time_col, "face file")
                 if alt_time_col and alt_time_col in face_df.columns:
                     if "timestamp" in face_df.columns:
                         face_df = face_df.rename(columns={"timestamp": GLOBAL_CLOCK_COLUMN})

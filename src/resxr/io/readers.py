@@ -189,6 +189,35 @@ def load_events_data(csv_path: Path) -> pd.DataFrame:
     return df
 
 
+def _read_enabled_flag(data: dict, key: str, json_path: Path, problems: dict[str, str]) -> bool:
+    """Read a ``*_enabled`` key as a boolean.
+
+    JSON true/false is used as is. The strings "true"/"false" (any case) are
+    converted with a WARNING. A missing key, or any other value (WARNING), reads
+    as False, and the reason is stored in *problems* so a stream dropped because
+    of it can say why.
+    """
+    if key not in data:
+        problems[key] = f"{key} missing"
+        return False
+    value = data[key]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        parsed = value.strip().lower() == "true"
+        logger.warning(
+            f"{json_path}: {key} is the string {value!r}; read as {str(parsed).lower()}. "
+            "Write true or false without quotes."
+        )
+        return parsed
+    problems[key] = f"{key} is {value!r}, not true or false"
+    logger.warning(
+        f"{json_path}: {key} is {value!r}, not true or false; read as false. "
+        "Write true or false without quotes."
+    )
+    return False
+
+
 def load_session_metadata(json_path: Path) -> SessionMetadata:
     """
     Parse session_metadata.json into SessionMetadata dataclass.
@@ -215,23 +244,52 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
             data = json.load(f)
     except Exception as e:
         raise DataLoadError(f"Failed to load {json_path}: {e}") from e
+    if not isinstance(data, dict):
+        raise DataLoadError(
+            f"{json_path} must hold a JSON object ({{...}}), not {type(data).__name__}"
+        )
 
     # Parse UTC start time
     utc_start = None
-    utc_str = data.get("utc_start_iso8601", "")
-    if utc_str:
+    utc_raw = data.get("utc_start_iso8601", "")
+    if utc_raw:
         try:
             # Unity writes 7 subsecond digits; Python 3.10's fromisoformat needs 3 or 6.
-            utc_str = utc_str.rstrip("Z")
+            utc_str = utc_raw.rstrip("Z")
             utc_str = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), utc_str)
             utc_start = datetime.fromisoformat(utc_str)
-        except ValueError:
-            logger.warning(f"Could not parse UTC timestamp: {utc_str}")
+        except (ValueError, AttributeError):
+            logger.warning(
+                f"Could not parse UTC timestamp: {utc_raw!r} (utc_start_iso8601 in {json_path}); "
+                "scans.tsv acq_time is n/a. Use ISO 8601 UTC, e.g. 2026-06-10T10:14:19.4723370Z"
+            )
 
     # Unity-recorder key; other engines may not emit it, in which case the
     # 0.02 s default (Unity's 50 Hz fixed update) is only a guess.
     if "fixedDeltaTime" not in data:
-        logger.warning("SessionMetadata has no 'fixedDeltaTime' key; defaulting to 0.02 s")
+        logger.warning(
+            f"SessionMetadata has no 'fixedDeltaTime' key; defaulting to 0.02 s ({json_path}; "
+            "the value is shown only in the report header)"
+        )
+
+    if "session_id" not in data:
+        logger.warning(
+            f"{json_path} has no session_id; using 'unknown': custom tables are read only from "
+            "a folder named 'unknown_CustomTables' and the report is named unknown_report.html. "
+            "Add session_id (the prefix of the session's file names)."
+        )
+
+    flag_problems: dict[str, str] = {}
+    flags = {
+        key: _read_enabled_flag(data, key, json_path, flag_problems)
+        for key in (
+            "face_enabled",
+            "body_enabled",
+            "hands_enabled",
+            "eyes_enabled",
+            "controllers_enabled",
+        )
+    }
 
     return SessionMetadata(
         session_id=data.get("session_id", "unknown"),
@@ -242,11 +300,8 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
         sampling_mode=data.get("sampling_mode", ""),
         fixed_delta_time=data.get("fixedDeltaTime", 0.02),
         schema_rev=data.get("schema_rev", ""),
-        face_enabled=data.get("face_enabled", False),
-        body_enabled=data.get("body_enabled", False),
-        hands_enabled=data.get("hands_enabled", False),
-        eyes_enabled=data.get("eyes_enabled", False),
-        controllers_enabled=data.get("controllers_enabled", False),
+        **flags,
+        flag_problems=flag_problems,
         # New schema_* keys; fall back to legacy detected_* names for older sessions.
         schema_hand_bones=data.get("schema_hand_bones", data.get("detected_hand_bones", 0)),
         schema_body_joints=data.get("schema_body_joints", data.get("detected_body_joints", 0)),
