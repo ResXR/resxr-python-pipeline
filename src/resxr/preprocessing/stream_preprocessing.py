@@ -18,8 +18,8 @@ Provides two independent preprocessing stages:
    - ``timeSinceStartup`` → ``latency_global``: global Unity clock seconds
      from recording onset.  Only present when the stream uses an alternate
      per-system time column (configured in ``alternate_time_columns``).
-   - Pre-onset rows (where the raw timestamp was 0) are set to ``np.nan``
-     because no valid timing exists yet.
+   - Rows whose clock value is 0 or not finite (before onset, after offset or
+     in between) are set to ``np.nan``, because they have no valid time.
 
    Called at write time in ``pipeline.write_bids_output`` for both RAW and
    DERIVATIVE datasets.  The returned DataFrame is passed directly to
@@ -43,7 +43,7 @@ import pandas as pd
 from ..core.constants import GLOBAL_CLOCK_COLUMN
 from ..core.logger import get_logger
 from ..core.session import TrackingStream
-from ..utils import find_first_nonzero_index, find_last_nonzero_index
+from ..utils import find_first_nonzero_index
 
 logger = get_logger(__name__)
 
@@ -203,6 +203,12 @@ def preprocess_stream(
 _INTERNAL_TIME_COLS = {"timestamp", GLOBAL_CLOCK_COLUMN}
 
 
+def _has_time(values: pd.Series) -> pd.Series:
+    """True where a clock value is a valid time: finite and not 0."""
+    values = pd.to_numeric(values, errors="coerce")
+    return np.isfinite(values) & (values != 0)
+
+
 def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) -> pd.DataFrame:
     """
     Prepare a stream DataFrame for BIDS motion output.
@@ -223,8 +229,9 @@ def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) 
       ``timestamp`` was preserved as ``timeSinceStartup`` by the splitter).
 
     Recording onset is determined by ``find_first_nonzero_index``
-    (first finite non-zero value).  Rows before onset are set to
-    ``np.nan`` since no valid timing exists yet.
+    (first finite non-zero value).  A row whose clock value is 0 or not
+    finite (before onset, after offset or in between) gets ``np.nan``,
+    since it has no valid time.
 
     Parameters
     ----------
@@ -251,7 +258,6 @@ def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) 
     if "timestamp" in out.columns and len(out) > 0:
         ts_vals = out["timestamp"].values
         onset_idx = find_first_nonzero_index(ts_vals)
-        offset_idx = find_last_nonzero_index(ts_vals)
         onset = float(ts_vals[onset_idx]) if onset_idx is not None else 0.0
         if onset_idx is not None and GLOBAL_CLOCK_COLUMN in out.columns:
             hardware_onset = onset
@@ -262,29 +268,21 @@ def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) 
         ):
             onset = global_onset
 
-        latency = out["timestamp"] - onset
-        if onset_idx is not None and onset_idx > 0:
-            latency.iloc[:onset_idx] = np.nan
-        if offset_idx is not None and offset_idx < len(latency) - 1:
-            latency.iloc[offset_idx + 1 :] = np.nan
-
+        latency = (out["timestamp"] - onset).where(_has_time(out["timestamp"]), np.nan)
         out.insert(0, "latency", latency)
         logger.debug(f"Added latency channel (onset: {onset:.3f}s)")
 
     if GLOBAL_CLOCK_COLUMN in out.columns and len(out) > 0:
         tsu_vals = out[GLOBAL_CLOCK_COLUMN].values
         global_onset_idx = find_first_nonzero_index(tsu_vals)
-        global_offset_idx = find_last_nonzero_index(tsu_vals)
         if global_onset is None or global_onset_idx is None:
             global_onset = (
                 float(tsu_vals[global_onset_idx]) if global_onset_idx is not None else 0.0
             )
 
-        latency_global = out[GLOBAL_CLOCK_COLUMN] - global_onset
-        if global_onset_idx is not None and global_onset_idx > 0:
-            latency_global.iloc[:global_onset_idx] = np.nan
-        if global_offset_idx is not None and global_offset_idx < len(latency_global) - 1:
-            latency_global.iloc[global_offset_idx + 1 :] = np.nan
+        latency_global = (out[GLOBAL_CLOCK_COLUMN] - global_onset).where(
+            _has_time(out[GLOBAL_CLOCK_COLUMN]), np.nan
+        )
 
         # Insert right after latency if it exists, otherwise at position 0
         idx = out.columns.get_loc("latency") + 1 if "latency" in out.columns else 0
@@ -295,8 +293,7 @@ def prepare_motion_data(df: pd.DataFrame, *, global_onset: float | None = None) 
     if hardware_onset is not None:
         for column in [c for c in out.columns if c.endswith("_Time")]:
             values = pd.to_numeric(out[column], errors="coerce")
-            valid = np.isfinite(values) & (values != 0)
-            out[column] = (values - hardware_onset).where(valid, np.nan)
+            out[column] = (values - hardware_onset).where(_has_time(values), np.nan)
 
     # Remove internal time columns
     out = out.drop(columns=[c for c in _INTERNAL_TIME_COLS if c in out.columns])

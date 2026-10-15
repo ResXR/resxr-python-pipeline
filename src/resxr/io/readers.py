@@ -34,7 +34,7 @@ def check_clock(values: pd.Series, source: Path) -> None:
 
     The column must be in seconds, never step backward and have a value in every
     row. Leading and trailing zero rows are allowed (before onset and after
-    offset) and are ignored here. Steps longer than 10 times the median step
+    offset); a zero between valid values is counted. Steps longer than 10 times the median step
     are reported at INFO, since valid recordings can have them. Nothing is
     changed: the pipeline does not sort rows, convert units or interpolate. A
     non-numeric column is left to the stream check, which skips the session.
@@ -48,9 +48,17 @@ def check_clock(values: pd.Series, source: Path) -> None:
             f"{source}: {missing} row(s) have no {GLOBAL_CLOCK_COLUMN} value (empty or NaN); "
             "their global latency is n/a"
         )
-    valid = t[np.isfinite(t) & (t != 0)]
+    has_time = np.isfinite(t) & (t != 0)
+    valid = t[has_time]
     if valid.size < 2:
         return
+    inside = np.flatnonzero(has_time)
+    zeros = int((t[inside[0] : inside[-1] + 1] == 0).sum())
+    if zeros:
+        logger.warning(
+            f"{source}: {zeros} row(s) have a zero {GLOBAL_CLOCK_COLUMN} between valid values; "
+            "their global latency is n/a"
+        )
     steps = np.diff(valid)
     backward = int((steps < 0).sum())
     if backward:

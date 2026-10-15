@@ -537,3 +537,22 @@ class TestPrepareMotionData:
         result = prepare_motion_data(head_stream.data)
         # No NaN except if there were leading zeros (there aren't in head_stream)
         assert result["latency"].notna().all()
+
+    def test_zero_or_non_finite_clock_values_inside_the_recording_are_nan(self):
+        """A zero or infinite clock value between valid values gets n/a, as at the edges."""
+        df = pd.DataFrame(
+            {
+                "timestamp": [0.0, 50.0, 0.0, 50.2, np.inf, 50.4, 0.0],
+                "timeSinceStartup": [0.0, 1.0, 1.1, 0.0, 1.3, np.inf, 1.5],
+                "signal": np.ones(7),
+            }
+        )
+        result = prepare_motion_data(df, global_onset=1.0)
+        np.testing.assert_allclose(
+            result["latency"], [np.nan, 0.0, np.nan, 0.2, np.nan, 0.4, np.nan], equal_nan=True
+        )
+        np.testing.assert_allclose(
+            result["latency_global"],
+            [np.nan, 0.0, 0.1, np.nan, 0.3, np.nan, 0.5],
+            equal_nan=True,
+        )

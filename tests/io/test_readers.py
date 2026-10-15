@@ -741,6 +741,19 @@ class TestClockDepartures:
         path, _ = self._load(tmp_path, clock, caplog)
         assert f"{path}: 3 row(s) have no timeSinceStartup value (empty or NaN)" in caplog.text
 
+    def test_zero_values_between_valid_values_are_counted(self, tmp_path, caplog):
+        import numpy as np
+
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[20:30] = 0.0
+        clock = np.r_[0.0, 0.0, clock, 0.0]  # leading and trailing zeros are not counted
+        path, df = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: 10 row(s) have a zero timeSinceStartup between valid values; their "
+            "global latency is n/a"
+        ]
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
     @pytest.mark.parametrize("loader", [load_continuous_data, load_face_data])
     def test_gaps_are_reported_at_info_and_rows_kept(self, tmp_path, caplog, loader):
         import logging

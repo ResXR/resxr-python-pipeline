@@ -1517,3 +1517,78 @@ def test_a_late_failure_in_an_existing_output_warns_once_per_folder(
     ]
     assert (bids_root / "sub-01" / "ses-01" / "A_report.html").exists()
     assert "Removed the output" not in caplog.text
+
+
+# ── Clock values between valid values (review 16 Oct) ─────────────────
+
+
+def _write_long_clocked_session(data_dir: Path, name: str, *, session_id: str, n: int = 30):
+    """A valid session of *n* regular rows with Head and Hands clocks."""
+    session_dir = _write_session_dir(data_dir, name, session_id=session_id)
+    t = 1.0 + np.arange(n) / 72.0
+    _edit_continuous(
+        session_dir,
+        lambda df: pd.DataFrame(
+            {
+                "timeSinceStartup": t,
+                "Node_Head_Time": t + 50.0,
+                "Node_Head_px": 0.1,
+                "Node_HandLeft_Time": t + 100.0,
+                "LeftHand_Root_px": 0.3,
+                "RightHand_Root_px": -0.3,
+                "LeftHand_Status_HandTracked": 1,
+                "RightHand_Status_HandTracked": 1,
+            }
+        ),
+    )
+    return session_dir
+
+
+def _motion(bids_root: Path, system: str) -> pd.DataFrame:
+    """The raw motion.tsv of sub-01 ses-01 with the column names from channels.tsv."""
+    motion_dir = bids_root / "sub-01" / "ses-01" / "motion"
+    (channels,) = motion_dir.glob(f"*_tracksys-{system}_channels.tsv")
+    (motion,) = motion_dir.glob(f"*_tracksys-{system}_motion.tsv")
+    names = pd.read_csv(channels, sep="\t")["name"].tolist()
+    return pd.read_csv(motion, sep="\t", header=None, names=names, na_values="n/a")
+
+
+def test_zero_clock_values_between_valid_values_are_warned_and_written_as_n_a(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir = tmp_path / "sessions"
+    session_dir = _write_long_clocked_session(data_dir, "sess_a", session_id="A")
+    _edit_continuous(
+        session_dir,
+        lambda df: df.assign(
+            timeSinceStartup=df["timeSinceStartup"].where(~df.index.isin(range(10, 13)), 0.0),
+            Node_HandLeft_Time=df["Node_HandLeft_Time"].where(~df.index.isin([20, 21]), 0.0),
+        ),
+    )
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    bids_root = tmp_path / "bids_out"
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[{"source_dir": "sess_a", "subject_id": "01", "session_label": "01"}],
+    )
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert result.exit_code == 0
+    (path,) = session_dir.glob("*_ContinuousData.csv")
+    assert (
+        f"{path}: 3 row(s) have a zero timeSinceStartup between valid values; their global "
+        "latency is n/a"
+    ) in caplog.text
+    for system in ("Head", "Hands"):
+        motion = _motion(bids_root, system)
+        assert motion["latency_global"].isna().tolist() == [i in (10, 11, 12) for i in range(30)]
+        assert (motion["latency_global"].dropna() >= 0).all()
+    hands = _motion(bids_root, "Hands")
+    assert hands["latency"].isna().tolist() == [i in (20, 21) for i in range(30)]
+    assert (hands["latency"].dropna() >= 0).all()
