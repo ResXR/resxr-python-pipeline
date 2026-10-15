@@ -64,40 +64,65 @@ class EyesClosedCheck:
         col_right = "Eyes_Closed_R"
 
         df = face_stream.data
+        missing = [col for col in (col_left, col_right) if col not in df.columns]
+        if missing:
+            logger.warning(
+                f"Session '{session.session_id}': eyes_closed not run: columns "
+                f"{', '.join(missing)} missing from the face file (the check reads "
+                f"{col_left} and {col_right})"
+            )
+            session.record_check_not_run(
+                self.name, TrackingSystem.FACE.value, f"columns {', '.join(missing)} missing"
+            )
+            return flags
+        if GLOBAL_CLOCK_COLUMN not in df.columns:
+            logger.error(
+                f"Session '{session.session_id}': "
+                "FACE: timeSinceStartup column missing — "
+                "cannot create eyes_closed flags. "
+                "Check alternate_time_columns in pipeline_config.yaml."
+            )
+            session.record_check_not_run(
+                self.name,
+                TrackingSystem.FACE.value,
+                "no separate timeSinceStartup column (the stream has no per-system clock "
+                "column; see preprocessing.alternate_time_columns)",
+            )
+            return flags
+
         closed_segments: list[tuple] = []
-        if col_left in df.columns and col_right in df.columns:
-            closed_mask = (df[col_left] >= threshold) & (df[col_right] >= threshold)
-            if closed_mask.any():
-                if GLOBAL_CLOCK_COLUMN not in df.columns:
-                    logger.error(
-                        "FACE: timeSinceStartup column missing — "
-                        "cannot create eyes_closed flags. "
-                        "Check alternate_time_columns in pipeline_config.yaml."
-                    )
-                    return flags
-                face_flags = QualityFlag.from_mask(
-                    timestamps=df[GLOBAL_CLOCK_COLUMN].values,
-                    boolean_mask=closed_mask.values,
-                    check_name=self.name,
-                    system=TrackingSystem.FACE,
-                    severity="info",
-                    message=f"Both eyes closed (threshold ≥ {threshold})",
-                    should_mask=False,
-                    group_name="both_eyes",
-                    target_columns=[col_left, col_right],
-                )
-                for f in face_flags:
-                    if (not use_min_duration) or (f.duration >= min_duration):
-                        flags.append(f)
-                        closed_segments.append((f.start_time, f.end_time))
+        closed_mask = (df[col_left] >= threshold) & (df[col_right] >= threshold)
+        if closed_mask.any():
+            face_flags = QualityFlag.from_mask(
+                timestamps=df[GLOBAL_CLOCK_COLUMN].values,
+                boolean_mask=closed_mask.values,
+                check_name=self.name,
+                system=TrackingSystem.FACE,
+                severity="info",
+                message=f"Both eyes closed (threshold ≥ {threshold})",
+                should_mask=False,
+                group_name="both_eyes",
+                target_columns=[col_left, col_right],
+            )
+            for f in face_flags:
+                if (not use_min_duration) or (f.duration >= min_duration):
+                    flags.append(f)
+                    closed_segments.append((f.start_time, f.end_time))
 
         # Propagate mask to EYES stream for optional gaze filtering
         if eyes_stream is not None and not eyes_stream.data.empty and closed_segments:
             if GLOBAL_CLOCK_COLUMN not in eyes_stream.data.columns:
                 logger.error(
+                    f"Session '{session.session_id}': "
                     "EYES: timeSinceStartup column missing — "
                     "cannot propagate eyes_closed flags to Eyes stream. "
                     "Check alternate_time_columns in pipeline_config.yaml."
+                )
+                session.record_check_not_run(
+                    self.name,
+                    TrackingSystem.EYES.value,
+                    "eyes-closed flags not carried over to Eyes: no separate timeSinceStartup "
+                    "column in Eyes (see preprocessing.alternate_time_columns)",
                 )
             else:
                 eyes_ts = eyes_stream.data[GLOBAL_CLOCK_COLUMN].values

@@ -248,6 +248,30 @@ class TestRunAll:
         # Should not raise
         result = registry.run_all(head_stream, minimal_session, config)
         assert isinstance(result, list)
+        assert [(c.check, c.stream, c.reason) for c in minimal_session.checks_not_run] == [
+            ("broken", "Head", "failed: Intentional error")
+        ]
+
+    def test_run_all_records_a_check_whose_stream_is_missing_once(
+        self, head_stream, minimal_session, caplog
+    ):
+        """A multi-stream check without its stream is recorded and logged once per session."""
+        import logging
+
+        registry = CheckRegistry()
+        registry.register(_MultiStreamCheck())
+        config = _make_validation_config(["multi_stream"])
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            registry.run_all(head_stream, minimal_session, config)
+            registry.run_all(head_stream, minimal_session, config)
+        message = (
+            "Session 'test_session_001': check 'multi_stream' not run: "
+            "the session has no Hands stream"
+        )
+        assert caplog.text.count(message) == 1
+        assert [(c.check, c.stream, c.reason) for c in minimal_session.checks_not_run] == [
+            ("multi_stream", "Hands", "the session has no Hands stream")
+        ]
 
 
 # ===========================================================================

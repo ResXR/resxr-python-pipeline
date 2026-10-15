@@ -124,10 +124,14 @@ class CheckRegistry:
                     # Multi-stream check: verify all required streams exist
                     missing = [s for s in required_streams if not session.has_stream(s)]
                     if missing:
-                        logger.debug(
-                            f"Skipping check '{check.name}': missing required "
-                            f"streams {[s.value for s in missing]}"
-                        )
+                        names = ", ".join(s.value for s in missing)
+                        if session.record_check_not_run(
+                            check.name, names, f"the session has no {names} stream"
+                        ):
+                            logger.info(
+                                f"Session '{session.session_id}': check '{check.name}' "
+                                f"not run: the session has no {names} stream"
+                            )
                         continue
 
                     # Only run when processing the first required stream
@@ -147,14 +151,16 @@ class CheckRegistry:
                 )
             except Exception as e:
                 logger.error(
-                    "Check '%s' failed on %s — no flags produced for this "
+                    "Session '%s': check '%s' failed on %s — no flags produced for this "
                     "check. Downstream derivative data may contain unmasked "
                     "bad segments. Error: %s",
+                    session.session_id,
                     check.name,
                     stream.system.value,
                     e,
                 )
                 self._failed_checks.append((check.name, stream.system.value, str(e)))
+                session.record_check_not_run(check.name, stream.system.value, f"failed: {e}")
 
         return flags
 

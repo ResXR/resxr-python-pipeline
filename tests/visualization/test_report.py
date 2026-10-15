@@ -113,6 +113,19 @@ class TestReportGenerator:
         assert "<th>Hand joint frame</th>" in content
         assert "<td>Left tracking_space, Right global</td>" in content
 
+    def test_generate_lists_checks_not_run(self, generator):
+        session = _minimal_session()
+        before = generator.generate(session).read_text(encoding="utf-8")
+        assert "Checks not run" not in before
+        # With nothing to list, the page keeps its earlier layout (no extra lines).
+        assert '</table>\n        </section>\n\n        <section class="streams">' in before
+        session.record_check_not_run("eyes_closed", "Face", "the session has no Face stream")
+        session.record_check_not_run("eyes_closed", "Face", "the session has no Face stream")
+        content = generator.generate(session).read_text(encoding="utf-8")
+        assert "<h2>Checks not run (1)</h2>" in content
+        assert "<td>eyes_closed</td>\n                        <td>Face</td>\n" in content
+        assert "<td>the session has no Face stream</td>" in content
+
     def test_generate_respects_explicit_output_path(self, generator, tmp_path):
         session = _minimal_session()
         explicit = tmp_path / "custom_report.html"

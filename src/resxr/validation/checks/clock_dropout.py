@@ -65,9 +65,16 @@ class ClockDropoutCheck:
 
         if GLOBAL_CLOCK_COLUMN not in df.columns:
             logger.error(
-                "%s: timeSinceStartup column missing — cannot check for clock "
+                "Session '%s': %s: timeSinceStartup column missing — cannot check for clock "
                 "dropouts.  Check alternate_time_columns in pipeline_config.yaml.",
+                session.session_id,
                 stream.system.value,
+            )
+            session.record_check_not_run(
+                self.name,
+                stream.system.value,
+                "no separate timeSinceStartup column (the stream has no per-system clock "
+                "column; see preprocessing.alternate_time_columns)",
             )
             return flags
 

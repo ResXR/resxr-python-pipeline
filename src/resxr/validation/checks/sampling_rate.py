@@ -48,9 +48,16 @@ class SamplingRateCheck:
 
         if GLOBAL_CLOCK_COLUMN not in df.columns:
             logger.error(
+                f"Session '{session.session_id}': "
                 f"{stream.system.value}: timeSinceStartup column missing — "
                 "cannot create sampling_rate flags. "
                 "Check alternate_time_columns in pipeline_config.yaml."
+            )
+            session.record_check_not_run(
+                self.name,
+                stream.system.value,
+                "no separate timeSinceStartup column (the stream has no per-system clock "
+                "column; see preprocessing.alternate_time_columns)",
             )
             return flags
         timestamps = df[GLOBAL_CLOCK_COLUMN].values

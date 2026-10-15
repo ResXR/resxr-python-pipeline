@@ -214,6 +214,15 @@ class CustomTableSchema:
     columns: list[ColumnInfoEntry]
 
 
+@dataclass(frozen=True)
+class CheckNotRun:
+    """An enabled quality check that produced no result for a stream, and why."""
+
+    check: str
+    stream: str
+    reason: str
+
+
 @dataclass
 class SessionMetadata:
     """
@@ -410,6 +419,17 @@ class Session:
 
     # Source paths for reference
     source_dir: str | None = None
+
+    # Enabled checks that produced no result for a stream (shown in the report)
+    checks_not_run: list[CheckNotRun] = field(default_factory=list)
+
+    def record_check_not_run(self, check: str, stream: str, reason: str) -> bool:
+        """Record that *check* produced no result for *stream*; False if already recorded."""
+        entry = CheckNotRun(check=check, stream=stream, reason=reason)
+        if entry in self.checks_not_run:
+            return False
+        self.checks_not_run.append(entry)
+        return True
 
     def initialize_motion_time_zero(self) -> float:
         """Set the time zero: the main data's first valid timeSinceStartup."""

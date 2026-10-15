@@ -161,6 +161,11 @@ class ReportGenerator:
             "hand_joint_frames": ", ".join(
                 f"{side} {frame}" for side, frame in session.hand_joint_frames.items()
             ),
+            # Enabled checks that produced no result for a stream, and why
+            "checks_not_run": [
+                {"check": entry.check, "stream": entry.stream, "reason": entry.reason}
+                for entry in session.checks_not_run
+            ],
             # Per-stream info
             "streams": self._stream_stats(session),
             # Quality flags (times relative to global recording onset)

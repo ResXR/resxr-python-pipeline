@@ -35,6 +35,7 @@ from .exceptions import (
 )
 from .logger import get_logger, setup_logging
 from .session import (
+    CheckNotRun,
     ColumnInfoEntry,
     CustomTableSchema,
     QualityFlag,
@@ -56,6 +57,7 @@ __all__ = [
     "SessionMetadata",
     "TrackingStream",
     "QualityFlag",
+    "CheckNotRun",
     "ColumnInfoEntry",
     "CustomTableSchema",
     # Config
