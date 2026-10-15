@@ -265,9 +265,10 @@ def _read_enabled_flag(data: dict, key: str, json_path: Path, problems: dict[str
             "Write true or false without quotes."
         )
         return parsed
-    problems[key] = f"{key} is {value!r}, not true or false"
+    shown = json.dumps(value)  # as written in the file: null, not None
+    problems[key] = f"{key} is {shown}, not true or false"
     logger.warning(
-        f"{json_path}: {key} is {value!r}, not true or false; read as false. "
+        f"{json_path}: {key} is {shown}, not true or false; read as false. "
         "Write true or false without quotes."
     )
     return False

@@ -178,15 +178,17 @@ class TestSessionMetadataDepartures:
         assert f"{path}: eyes_enabled is the string 'TRUE'; read as true." in caplog.text
         assert "hands_enabled" not in meta.flag_problems
 
-    @pytest.mark.parametrize("value", ["no", 1, None, "yes"])
-    def test_other_values_read_as_false_with_a_warning(self, tmp_path, caplog, value):
+    @pytest.mark.parametrize(
+        ("value", "shown"), [("no", '"no"'), (1, "1"), (None, "null"), ("yes", '"yes"')]
+    )
+    def test_other_values_read_as_false_with_a_warning(self, tmp_path, caplog, value, shown):
         data = {"session_id": "s", "fixedDeltaTime": 0.02, "eyes_enabled": value}
         path, meta = self._load(tmp_path, data, caplog)
         assert meta.eyes_enabled is False
-        assert f"{path}: eyes_enabled is {value!r}, not true or false; read as false." in (
+        assert f"{path}: eyes_enabled is {shown}, not true or false; read as false." in (
             caplog.text
         )
-        assert meta.flag_problems["eyes_enabled"] == f"eyes_enabled is {value!r}, not true or false"
+        assert meta.flag_problems["eyes_enabled"] == f"eyes_enabled is {shown}, not true or false"
 
     @pytest.mark.parametrize(
         "data",
