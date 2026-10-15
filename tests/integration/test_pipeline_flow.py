@@ -980,6 +980,25 @@ def test_a_skipped_session_gives_a_warning_summary_and_exit_code_1(
     assert main(["-c", str(cfg)]) == 1
 
 
+def test_quiet_run_still_shows_a_skipped_session_and_exits_1(tmp_path, minimal_config_dict, capsys):
+    from resxr.cli import main
+
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict, second="sess_missing")
+    resxr_logger = logging.getLogger("resxr")
+    level, handlers = resxr_logger.level, list(resxr_logger.handlers)
+    try:
+        assert main(["-q", "-c", str(cfg)]) == 1
+    finally:  # main() set the 'resxr' logger to ERROR with its own handler
+        resxr_logger.setLevel(level)
+        resxr_logger.handlers[:] = handlers
+    out = capsys.readouterr().out
+    assert (
+        "ERROR - resxr.pipeline - Failed to process sess_missing: Session directory not found"
+    ) in out
+    assert " INFO - " not in out
+    assert " WARNING - " not in out
+
+
 def test_every_session_failing_gives_an_error_summary_and_exit_code_1(
     tmp_path, minimal_config_dict, caplog
 ):
@@ -1258,6 +1277,21 @@ def test_header_only_continuous_file_skips_the_session_with_an_error(
     assert (
         "Failed to process sess_a: No tracking stream to export from "
         f"{data_dir / 'sess_a'}: the continuous data file has no data rows"
+    ) in caplog.text
+    assert result.exit_code == 1
+
+
+def test_continuous_file_without_tracking_columns_skips_the_session_with_an_error(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_continuous(data_dir / "sess_a", lambda df: df[["timeSinceStartup"]].assign(EDA_uS=0.5))
+    result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert (
+        "Failed to process sess_a: No tracking stream to export from "
+        f"{data_dir / 'sess_a'}: no enabled tracking system has data columns (see the "
+        "messages above)"
     ) in caplog.text
     assert result.exit_code == 1
 

@@ -296,6 +296,44 @@ class TestDroppedStreamsAreReported:
         assert TrackingSystem.FACE not in result
         assert "Session 'test': Face not exported: the face file has no data rows" in caplog.text
 
+    def test_face_file_with_face_enabled_missing_warns(self, continuous_df, caplog):
+        from tests.conftest import _face_df
+
+        metadata = SessionMetadata(
+            session_id="test",
+            hands_enabled=True,
+            eyes_enabled=True,
+            flag_problems={"face_enabled": "face_enabled missing"},
+        )
+        session = _make_session(metadata, continuous_df)
+        session.raw_face_data = _face_df()
+        result = self._split(session, caplog)
+        assert TrackingSystem.FACE not in result
+        (record,) = [r for r in caplog.records if "Face not exported" in r.getMessage()]
+        assert record.levelname == "WARNING"
+        assert record.getMessage() == (
+            "Session 'test': Face not exported: metadata does not mark it enabled "
+            "(face_enabled missing); the face file stays only in sourcedata/"
+        )
+
+    def test_face_file_without_its_clock_column_warns(
+        self, session_metadata, continuous_df, caplog
+    ):
+        from tests.conftest import _face_df
+
+        session = _make_session(session_metadata, continuous_df)
+        session.raw_face_data = _face_df()  # no Face_Time column
+        result = self._split(session, caplog, alternate_time_columns={"Face": "Face_Time"})
+        assert TrackingSystem.FACE in result  # timed by timeSinceStartup instead
+        (record,) = [r for r in caplog.records if "clock column" in r.getMessage()]
+        assert record.levelname == "WARNING"
+        assert record.getMessage() == (
+            "Session 'test': clock column 'Face_Time' for Face "
+            "(preprocessing.alternate_time_columns) not found in the face file; Face is timed "
+            "by timeSinceStartup alone, and the checks that need a separate timeSinceStartup "
+            "column will not run on it"
+        )
+
     def test_valid_session_has_no_warning(self, session_metadata, continuous_df, caplog):
         from tests.conftest import _face_df
 

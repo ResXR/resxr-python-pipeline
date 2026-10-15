@@ -378,8 +378,11 @@ class TestLoadSession:
 
         shutil.copy(tmp_metadata_json, session_dir / "session_metadata.json")
         config = self._input_config(tmp_path)
-        with pytest.raises(MissingDataError, match="continuous"):
+        with pytest.raises(MissingDataError, match="continuous") as error:
             load_session(session_dir, config)
+        assert str(error.value).endswith(
+            "(every session folder needs one; the pattern is input.continuous_data_pattern)"
+        )
 
 
 # ===========================================================================
