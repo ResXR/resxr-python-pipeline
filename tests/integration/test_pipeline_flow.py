@@ -1508,6 +1508,24 @@ def test_a_session_skipped_while_loading_writes_and_removes_nothing(
     assert " rerun." not in caplog.text
 
 
+# The report stays off here: on code without the rule, a report named after "M:evil" would be
+# written to drive M:, outside tmp_path.
+@pytest.mark.parametrize("session_id", ["a:b", "E:evil", "M:evil", "a?b", "a/b", "..\\x"])
+def test_a_session_id_that_is_not_a_file_name_stem_skips_the_session_before_any_write(
+    tmp_path, minimal_config_dict, caplog, session_id
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    metadata = _edit_metadata(data_dir / "sess_a", lambda m: m.update(session_id=session_id))
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert result.skipped[0].reason.startswith(
+        f"{metadata}: session_id {json.dumps(session_id)} may hold only letters (A-Z, a-z), "
+    )
+    assert _session_outputs(tmp_path / "bids_out", "sub-01") == []
+    assert "Removed the output" not in caplog.text  # nothing was written
+
+
 def test_removal_never_reaches_the_input_or_outside_the_output(tmp_path, minimal_config_dict):
     minimal_config_dict["input"]["data_dir"] = str(tmp_path / "data")
     minimal_config_dict["output"]["bids_root"] = str(tmp_path / "data" / "out")

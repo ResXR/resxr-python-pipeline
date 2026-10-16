@@ -218,17 +218,26 @@ class TestSessionMetadataDepartures:
             "scans.tsv acq_time is n/a"
         ) in caplog.text
 
-    @pytest.mark.parametrize("session_id", ["../../evil", "a/b", "a\\b", ".."])
-    def test_a_session_id_with_a_path_separator_is_a_load_error(self, tmp_path, session_id):
+    @pytest.mark.parametrize(
+        "session_id",
+        ["../../evil", "a/b", "a\\b", "..\\x", "a:b", "E:evil", "M:evil", "a?b", "a b", "a*b"],
+    )
+    def test_a_session_id_that_is_not_a_file_name_stem_is_a_load_error(self, tmp_path, session_id):
         path = tmp_path / "x_SessionMetadata.json"
         path.write_text(json.dumps({"session_id": session_id}), encoding="utf-8")
         with pytest.raises(DataLoadError) as excinfo:
             load_session_metadata(path)
         assert str(excinfo.value) == (
-            f"{path}: session_id {json.dumps(session_id)} contains '/', '\\' or '..'; it names "
-            "the report and the custom-tables folder, so it must be a plain name (the prefix of "
-            "the session's file names). Correct session_id in the metadata file."
+            f"{path}: session_id {json.dumps(session_id)} may hold only letters (A-Z, a-z), "
+            "digits, '.', '_' and '-': it names the report and the custom-tables folder (it is "
+            "the prefix of the session's file names). Correct session_id in the metadata file."
         )
+
+    def test_the_template_session_id_is_accepted(self, tmp_path, caplog):
+        data = {"session_id": "2026.06.10_18-22", "fixedDeltaTime": 0.02}
+        _, meta = self._load(tmp_path, data, caplog)
+        assert meta.session_id == "2026.06.10_18-22"
+        assert caplog.records == []
 
     @pytest.mark.parametrize(("value", "shown"), [(False, "false"), (123, "123"), ([1], "[1]")])
     def test_a_session_id_that_is_not_text_is_read_as_unknown(self, tmp_path, caplog, value, shown):

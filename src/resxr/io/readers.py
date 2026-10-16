@@ -27,6 +27,9 @@ logger = get_logger(__name__)
 _CLOCK_STEP_LOOKS_LIKE_MS = 0.5
 # A timeSinceStartup step longer than this many expected intervals is reported as a gap.
 _CLOCK_GAP_INTERVALS = 10
+# A session_id names files (report, custom tables), so it must be a file-name stem: no drive
+# letter, separator or character Windows refuses in a name.
+_SESSION_ID = re.compile(r"[A-Za-z0-9._-]+")
 # Appended to a pandas tokenizing error of the continuous or face file
 _FORMAT_HINT = (
     "Check that the file is comma-separated with '.' as the decimal separator, and that every "
@@ -423,11 +426,11 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
             "Add session_id (the prefix of the session's file names)."
         )
         session_id = "unknown"
-    elif "/" in session_id or "\\" in session_id or ".." in session_id:
+    elif not _SESSION_ID.fullmatch(session_id):
         raise DataLoadError(
-            f"{json_path}: session_id {json.dumps(session_id)} contains '/', '\\' or '..'; it "
-            "names the report and the custom-tables folder, so it must be a plain name (the "
-            "prefix of the session's file names). Correct session_id in the metadata file."
+            f"{json_path}: session_id {json.dumps(session_id)} may hold only letters (A-Z, a-z), "
+            "digits, '.', '_' and '-': it names the report and the custom-tables folder (it is "
+            "the prefix of the session's file names). Correct session_id in the metadata file."
         )
 
     flag_problems: dict[str, str] = {}

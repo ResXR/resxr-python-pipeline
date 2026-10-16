@@ -27,7 +27,7 @@ _Nothing yet._
 - With `report.output_dir` set, two sessions with the same `session_id` write one report file (the second replaces the first); a warning names both sessions.
 - A session read from its own copy in the output's `sourcedata/` (reprocessing from the copies) is not copied onto itself: an info line says that sourcedata is the input folder and nothing was copied (before, with `output.overwrite: true`, every such session was skipped with "are the same file").
 - A face file that cannot be split into columns, or that has neither `timeSinceStartup` nor the configured Face clock column (as a semicolon-separated file), gets the same format hint as the continuous file: comma-separated, `.` as the decimal separator, and a header row that includes `timeSinceStartup` (before, the messages named the missing `Face_Time` and `timestamp` columns). As before, the first is read as a missing face file and the second skips its session.
-- A metadata `session_id` containing `/`, `\` or `..` skips its session with an error that names the key (`session_id` names the report and the custom-tables folder; before, `"../../../evil"` wrote the report outside the BIDS root).
+- A metadata `session_id` with a character other than letters (A-Z, a-z), digits, `.`, `_` and `-` skips its session with an error that names the key and these characters (`session_id` names the report and the custom-tables folder; before, `"../../../evil"` wrote the report outside the BIDS root, and on Windows a drive letter such as `"M:evil"` sent it to that drive).
 - `participants.tsv` has one row per subject (before, one row per processed session: a subject with two sessions, such as `ses-01` and `ses-02`, was listed twice).
 
 ### Changed
