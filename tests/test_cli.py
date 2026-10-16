@@ -572,8 +572,9 @@ class TestColumnGroupNamesAreChecked:
         with pytest.raises(ConfigurationError, match="must map check names to lists of"):
             validate_config(self._config(minimal_config_dict, selected))
 
-    def test_defined_group_names_are_accepted(self, minimal_config_dict):
-        validate_config(self._config(minimal_config_dict, {"stats_summary": ["gaze"]}))
+    @pytest.mark.parametrize("names", [["gaze"], None], ids=["named", "null_means_every_group"])
+    def test_defined_group_names_are_accepted(self, minimal_config_dict, names):
+        validate_config(self._config(minimal_config_dict, {"stats_summary": names}))
 
 
 class TestHelpAndShippedComments:

@@ -128,8 +128,8 @@ def validate_config(config: PipelineConfig) -> None:
     if selected is not None:
         group_names = [group.name for group in config.validation.column_groups]
         if not isinstance(selected, dict) or not all(
-            isinstance(names, list) and all(isinstance(n, str) for n in names)
-            for names in selected.values()
+            names is None or (isinstance(names, list) and all(isinstance(n, str) for n in names))
+            for names in selected.values()  # None: every group (get_column_groups)
         ):
             problems.append(
                 "validation.settings.check_column_groups must map check names to lists of "
@@ -137,7 +137,7 @@ def validate_config(config: PipelineConfig) -> None:
             )
         else:
             unknown_groups = sorted(
-                {name for names in selected.values() for name in names} - set(group_names)
+                {name for names in selected.values() for name in names or []} - set(group_names)
             )
             if unknown_groups:
                 problems.append(
