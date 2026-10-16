@@ -276,10 +276,9 @@ def copy_sourcedata(session_dir: Path, dest_dir: Path, overwrite: bool = False) 
     Verbatim only — no transformation, no filtering. If dest exists and is
     non-empty, skip (and warn) unless overwrite=True, so a re-run never clobbers
     a previously verified copy. With overwrite, the input is copied over the
-    existing copy, after its read-only files are made writable; a file no
-    longer in the input stays. When
-    *dest_dir* is the input folder itself (the session is read from
-    sourcedata/), nothing is copied.
+    existing copy, after its read-only files are made writable; a file no longer
+    in the input stays. When *dest_dir* is the input folder itself (the session
+    is read from sourcedata/), nothing is copied.
     """
     dest_dir = Path(dest_dir)
     if _is_input(session_dir, dest_dir):
