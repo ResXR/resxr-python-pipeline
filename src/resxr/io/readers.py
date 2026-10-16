@@ -7,10 +7,12 @@ Handles loading CSV tracking data and JSON metadata files.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from ..core.config import InputConfig
@@ -21,8 +23,127 @@ from ..core.session import ColumnInfoEntry, CustomTableSchema, Session, SessionM
 
 logger = get_logger(__name__)
 
+# A median timeSinceStartup step above this many seconds suggests milliseconds.
+_CLOCK_STEP_LOOKS_LIKE_MS = 0.5
+# A timeSinceStartup step longer than this many expected intervals is reported as a gap.
+_CLOCK_GAP_INTERVALS = 10
+# Appended to a pandas tokenizing error of the continuous or face file
+_FORMAT_HINT = (
+    "Check that the file is comma-separated with '.' as the decimal separator, and that every "
+    "row has the header's number of fields"
+)
 
-def load_continuous_data(csv_path: Path) -> pd.DataFrame:
+
+def no_clock_column_message(csv_path: Path | str, alternative: str = "") -> str:
+    """The error for a continuous or face file without timeSinceStartup (or *alternative*)."""
+    return (
+        f"No timestamp column found in {csv_path}: the file must be comma-separated, with a "
+        f"header row that includes {GLOBAL_CLOCK_COLUMN}{alternative}"
+    )
+
+
+def check_clock(values: pd.Series, source: Path, head_rate: float | None = None) -> None:
+    """Warn about a timeSinceStartup column that departs from the input contract.
+
+    The column must be in seconds, never step backward and have a value in every
+    row. Leading and trailing zero rows are allowed (before onset and after
+    offset); a zero between valid values is counted, and so is an empty, NaN or
+    infinite cell anywhere. These rows are left out of the step checks below
+    (backward steps, milliseconds, gaps). Steps longer than 10 times the expected Head
+    interval (1 / *head_rate*, from ``sampling_frequencies``; without it, the
+    median step) are reported at INFO, since valid recordings can have them;
+    not when the column looks like milliseconds, since the gaps would then be
+    misread. Nothing is changed: the pipeline does not sort rows, convert units
+    or interpolate. A non-numeric column is left to the stream check, which
+    skips the session.
+    """
+    if not pd.api.types.is_numeric_dtype(values):
+        return
+    t = values.to_numpy(dtype=float)
+    missing = int((~np.isfinite(t)).sum())
+    if missing:
+        logger.warning(
+            f"{source}: {missing} row(s) have no {GLOBAL_CLOCK_COLUMN} value (empty, NaN or "
+            "infinite); their global latency is n/a"
+        )
+    has_time = np.isfinite(t) & (t != 0)
+    valid = t[has_time]
+    if valid.size < 2:
+        return
+    inside = np.flatnonzero(has_time)
+    zeros = int((t[inside[0] : inside[-1] + 1] == 0).sum())
+    if zeros:
+        logger.warning(
+            f"{source}: {zeros} row(s) have a zero {GLOBAL_CLOCK_COLUMN} between valid values; "
+            "their global latency is n/a"
+        )
+    steps = np.diff(valid)
+    backward = int((steps < 0).sum())
+    if backward:
+        logger.warning(
+            f"{source}: {GLOBAL_CLOCK_COLUMN} goes backward {backward} time(s). Rows are kept "
+            "in file order, so latencies decrease there and flags near those rows may be "
+            f"wrong; sort the rows by {GLOBAL_CLOCK_COLUMN} if they were written out of order"
+        )
+    median_step = float(np.median(steps))
+    if median_step > _CLOCK_STEP_LOOKS_LIKE_MS:
+        logger.warning(
+            f"{source}: the median {GLOBAL_CLOCK_COLUMN} step is {median_step:.4g}, so the "
+            "column looks like milliseconds or the recording is slower than 2 Hz. It is read "
+            "as seconds and not converted: if it holds milliseconds, latencies, flag times and "
+            "event onsets will be wrong. Write it in seconds"
+        )
+        return  # gaps in seconds would be misread
+    if head_rate:
+        interval = 1.0 / head_rate
+        reference = f"the expected Head interval ({interval:.4f} s)"
+    else:
+        interval = median_step
+        reference = f"its median step ({interval:.4f} s; sampling_frequencies has no Head rate)"
+    if interval <= 0:
+        return
+    gaps = np.flatnonzero(steps > _CLOCK_GAP_INTERVALS * interval)
+    if gaps.size:
+        longest = gaps[np.argmax(steps[gaps])]
+        logger.info(
+            f"{source}: {GLOBAL_CLOCK_COLUMN} has {gaps.size} gap(s) longer than "
+            f"{_CLOCK_GAP_INTERVALS} times {reference}; the longest is {steps[longest]:.2f} s, "
+            f"after {GLOBAL_CLOCK_COLUMN} {valid[longest]:.2f}. Rows are not interpolated."
+        )
+
+
+def check_stream_clock(values: pd.Series, session_id: str, system: str, column: str) -> None:
+    """Warn about a per-system clock column in milliseconds or stepping backward.
+
+    The column is a stream's own clock (``preprocessing.alternate_time_columns``).
+    Its zero and empty cells are not reported here: leading and trailing ones
+    are normal, and those between valid values are flagged by the clock_dropout
+    check. A value repeats while the SDK sample does not change, so the median
+    is taken over the steps between distinct values. Nothing is changed.
+    """
+    if not pd.api.types.is_numeric_dtype(values):
+        return  # left to the stream check, which skips the session
+    t = values.to_numpy(dtype=float)
+    steps = np.diff(t[np.isfinite(t) & (t != 0)])
+    where = f"Session '{session_id}': clock column '{column}' for {system}"
+    backward = int((steps < 0).sum())
+    if backward:
+        logger.warning(
+            f"{where} goes backward {backward} time(s). Rows are kept in file order, so the "
+            f"{system} latency decreases there; sort the rows if they were written out of order"
+        )
+    forward = steps[steps > 0]
+    median_step = float(np.median(forward)) if forward.size else 0.0
+    if median_step > _CLOCK_STEP_LOOKS_LIKE_MS:
+        logger.warning(
+            f"{where} has a median step of {median_step:.4g}, so the column looks like "
+            f"milliseconds or {system} was sampled slower than 2 Hz. It is read as seconds and "
+            f"not converted: if it holds milliseconds, the {system} latency and effective "
+            "sampling rate will be wrong. Write it in seconds"
+        )
+
+
+def load_continuous_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFrame:
     """
     Load ContinuousData CSV with proper dtype handling.
 
@@ -30,6 +151,9 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
     ----------
     csv_path : Path
         Path to ContinuousData CSV file
+    head_rate : float, optional
+        Expected Head sampling rate (Hz); sets the reference for the gap line of
+        ``check_clock``
 
     Returns
     -------
@@ -50,6 +174,8 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
             low_memory=False,
             encoding="utf-8-sig",  # Handle BOM
         )
+    except pd.errors.ParserError as e:
+        raise DataLoadError(f"Failed to load {csv_path}: {str(e).strip()}. {_FORMAT_HINT}") from e
     except Exception as e:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
 
@@ -61,13 +187,14 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
         df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
 
     if "timestamp" not in df.columns:
-        raise DataLoadError(f"No timestamp column found in {csv_path}")
+        raise DataLoadError(no_clock_column_message(csv_path))
 
+    check_clock(df["timestamp"], csv_path, head_rate)
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
     return df
 
 
-def load_face_data(csv_path: Path) -> pd.DataFrame:
+def load_face_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFrame:
     """
     Load FaceExpressionData CSV with proper boolean/float handling.
 
@@ -75,6 +202,8 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
     ----------
     csv_path : Path
         Path to FaceExpressionData CSV file
+    head_rate : float, optional
+        Expected Head sampling rate (Hz), as for ``load_continuous_data``
 
     Returns
     -------
@@ -95,14 +224,19 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
             low_memory=False,
             encoding="utf-8-sig",
         )
+    except pd.errors.ParserError as e:
+        raise DataLoadError(f"Failed to load {csv_path}: {str(e).strip()}. {_FORMAT_HINT}") from e
     except Exception as e:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
+    df.attrs["path"] = str(csv_path)  # named when the splitter finds no clock column
 
     # Rename timestamp column
     if GLOBAL_CLOCK_COLUMN in df.columns:
         df = df.rename(columns={GLOBAL_CLOCK_COLUMN: "timestamp"})
     elif f"\ufeff{GLOBAL_CLOCK_COLUMN}" in df.columns:
         df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
+    if "timestamp" in df.columns:
+        check_clock(df["timestamp"], csv_path, head_rate)
 
     if "Face_Status" in df.columns:
         if df["Face_Status"].dtype == object:
@@ -125,9 +259,10 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
         new_na = df["Face_Status"].isna() & ~was_na
         if new_na.any():
             logger.warning(
-                "Face_Status contains %d unmapped values that became NaN. "
+                "Face_Status contains %d unmapped values that became NaN (%s). "
                 "Check the source data for unexpected representations.",
                 new_na.sum(),
+                csv_path,
             )
 
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
@@ -188,6 +323,36 @@ def load_events_data(csv_path: Path) -> pd.DataFrame:
     return df
 
 
+def _read_enabled_flag(data: dict, key: str, json_path: Path, problems: dict[str, str]) -> bool:
+    """Read a ``*_enabled`` key as a boolean.
+
+    JSON true/false is used as is. The strings "true"/"false" (any case) are
+    converted with a WARNING. A missing key, or any other value (WARNING), reads
+    as False, and the reason is stored in *problems* so a stream dropped because
+    of it can say why.
+    """
+    if key not in data:
+        problems[key] = f"{key} missing"
+        return False
+    value = data[key]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        parsed = value.strip().lower() == "true"
+        logger.warning(
+            f"{json_path}: {key} is the string {value!r}; read as {str(parsed).lower()}. "
+            "Write true or false without quotes."
+        )
+        return parsed
+    shown = json.dumps(value)  # as written in the file: null, not None
+    problems[key] = f"{key} is {shown}, not true or false"
+    logger.warning(
+        f"{json_path}: {key} is {shown}, not true or false; read as false. "
+        "Write true or false without quotes."
+    )
+    return False
+
+
 def load_session_metadata(json_path: Path) -> SessionMetadata:
     """
     Parse session_metadata.json into SessionMetadata dataclass.
@@ -214,37 +379,81 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
             data = json.load(f)
     except Exception as e:
         raise DataLoadError(f"Failed to load {json_path}: {e}") from e
+    if not isinstance(data, dict):
+        raise DataLoadError(
+            f"{json_path} must hold a JSON object ({{...}}), not {type(data).__name__}"
+        )
 
     # Parse UTC start time
     utc_start = None
-    utc_str = data.get("utc_start_iso8601", "")
-    if utc_str:
+    utc_raw = data.get("utc_start_iso8601", "")
+    if utc_raw:
         try:
-            # Handle various ISO 8601 formats (fromisoformat supports both with/without fractional seconds)
-            utc_str = utc_str.rstrip("Z")
+            # Unity writes 7 subsecond digits; Python 3.10's fromisoformat needs 3 or 6.
+            utc_str = utc_raw.rstrip("Z")
+            utc_str = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), utc_str)
             utc_start = datetime.fromisoformat(utc_str)
-        except ValueError:
-            logger.warning(f"Could not parse UTC timestamp: {utc_str}")
+        except (ValueError, AttributeError):
+            logger.warning(
+                f"Could not parse UTC timestamp: {utc_raw!r} (utc_start_iso8601 in {json_path}); "
+                "scans.tsv acq_time is n/a. Use ISO 8601 UTC, e.g. 2026-06-10T10:14:19.4723370Z"
+            )
 
     # Unity-recorder key; other engines may not emit it, in which case the
     # 0.02 s default (Unity's 50 Hz fixed update) is only a guess.
+    fixed_delta_time = data.get("fixedDeltaTime", 0.02)
     if "fixedDeltaTime" not in data:
-        logger.warning("SessionMetadata has no 'fixedDeltaTime' key; defaulting to 0.02 s")
+        logger.warning(
+            f"SessionMetadata has no 'fixedDeltaTime' key; defaulting to 0.02 s ({json_path}; "
+            "the value is shown only in the report header)"
+        )
+    elif isinstance(fixed_delta_time, bool) or not isinstance(fixed_delta_time, (int, float)):
+        logger.warning(
+            f"SessionMetadata 'fixedDeltaTime' is {json.dumps(fixed_delta_time)}, not a number; "
+            f"defaulting to 0.02 s ({json_path}; the value is shown only in the report header)"
+        )
+        fixed_delta_time = 0.02
+
+    session_id = data.get("session_id")
+    if session_id in (None, "") or not isinstance(session_id, str):  # missing, null, "", other
+        shown = "" if session_id in (None, "") else f" (it is {json.dumps(session_id)}, not text)"
+        logger.warning(
+            f"{json_path} has no session_id{shown}; using 'unknown': custom tables are read only from "
+            "a folder named 'unknown_CustomTables' and the report is named unknown_report.html. "
+            "Add session_id (the prefix of the session's file names)."
+        )
+        session_id = "unknown"
+    elif "/" in session_id or "\\" in session_id or ".." in session_id:
+        raise DataLoadError(
+            f"{json_path}: session_id {json.dumps(session_id)} contains '/', '\\' or '..'; it "
+            "names the report and the custom-tables folder, so it must be a plain name (the "
+            "prefix of the session's file names). Correct session_id in the metadata file."
+        )
+
+    flag_problems: dict[str, str] = {}
+    flags = {
+        key: _read_enabled_flag(data, key, json_path, flag_problems)
+        for key in (
+            "face_enabled",
+            "body_enabled",
+            "hands_enabled",
+            "eyes_enabled",
+            "controllers_enabled",
+        )
+    }
 
     return SessionMetadata(
-        session_id=data.get("session_id", "unknown"),
+        session_id=session_id,
         utc_start=utc_start,
         device_utc_offset=data.get("device_utc_offset", ""),
         platform=data.get("platform", ""),
         build_id=data.get("build_id", ""),
         sampling_mode=data.get("sampling_mode", ""),
-        fixed_delta_time=data.get("fixedDeltaTime", 0.02),
+        fixed_delta_time=fixed_delta_time,
         schema_rev=data.get("schema_rev", ""),
-        face_enabled=data.get("face_enabled", False),
-        body_enabled=data.get("body_enabled", False),
-        hands_enabled=data.get("hands_enabled", False),
-        eyes_enabled=data.get("eyes_enabled", False),
-        controllers_enabled=data.get("controllers_enabled", False),
+        **flags,
+        flag_problems=flag_problems,
+        false_flags={key for key in flags if data.get(key) is False},
         # New schema_* keys; fall back to legacy detected_* names for older sessions.
         schema_hand_bones=data.get("schema_hand_bones", data.get("detected_hand_bones", 0)),
         schema_body_joints=data.get("schema_body_joints", data.get("detected_body_joints", 0)),
@@ -379,13 +588,16 @@ def find_session_files(session_dir: Path, config: InputConfig) -> SessionFiles:
 
     def _most_recent(pattern: str) -> Path | None:
         files = list(session_dir.glob(pattern))
+        chosen = max(files, key=lambda p: p.stat().st_mtime) if files else None
         if len(files) > 1:
             logger.warning(
-                "Multiple files matched '%s' in %s; using most recent by mtime.",
+                "Multiple files matched '%s' in %s; using most recent by mtime: %s. "
+                "Keep one file per pattern in each session folder.",
                 pattern,
                 session_dir,
+                chosen.name,
             )
-        return max(files, key=lambda p: p.stat().st_mtime) if files else None
+        return chosen
 
     return SessionFiles(
         continuous=_most_recent(config.continuous_data_pattern),
@@ -395,7 +607,28 @@ def find_session_files(session_dir: Path, config: InputConfig) -> SessionFiles:
     )
 
 
-def load_session(session_dir: Path, config: InputConfig) -> Session:
+def _report_missing_events(session_dir: Path, pattern: str, has_custom_tables: bool) -> None:
+    """Say that no events file was read: INFO, or WARNING when a similar file is present."""
+    consequence = (
+        "events.tsv is built from the custom tables only"
+        if has_custom_tables
+        else "no events.tsv is written (no custom tables either)"
+    )
+    similar = sorted(
+        p.name
+        for p in session_dir.iterdir()
+        if p.is_file() and p.suffix.lower() == ".csv" and "event" in p.name.lower()
+    )
+    if similar:
+        logger.warning(
+            f"No events file matching '{pattern}' in {session_dir}; {similar} not read (rename "
+            f"it or set input.events_data_pattern). {consequence.capitalize()}."
+        )
+    else:
+        logger.info(f"No events file matching '{pattern}' in {session_dir}; {consequence}.")
+
+
+def load_session(session_dir: Path, config: InputConfig, head_rate: float | None = None) -> Session:
     """
     Load all data files from a session directory into a Session object.
 
@@ -405,6 +638,9 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
         Directory containing session data files
     config : InputConfig
         Input configuration specifying file patterns
+    head_rate : float, optional
+        Expected Head sampling rate (``sampling_frequencies.Head``), the
+        reference for the timeSinceStartup gap line (without it, the median step)
 
     Returns
     -------
@@ -430,22 +666,25 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     # Metadata is required
     if files.metadata is None:
         raise MissingDataError(
-            f"No metadata file matching '{config.metadata_pattern}' in {session_dir}"
+            f"No metadata file matching '{config.metadata_pattern}' in {session_dir} "
+            "(every session folder needs one; the pattern is input.metadata_pattern)"
         )
     metadata = load_session_metadata(files.metadata)
 
     # Load continuous data (required)
     if files.continuous is None:
         raise MissingDataError(
-            f"No continuous data file matching '{config.continuous_data_pattern}' in {session_dir}"
+            f"No continuous data file matching '{config.continuous_data_pattern}' in "
+            f"{session_dir} (every session folder needs one; the pattern is "
+            "input.continuous_data_pattern)"
         )
-    raw_continuous = load_continuous_data(files.continuous)
+    raw_continuous = load_continuous_data(files.continuous, head_rate)
 
     # Load face data (optional)
     raw_face = None
     if files.face is not None:
         try:
-            raw_face = load_face_data(files.face)
+            raw_face = load_face_data(files.face, head_rate)
         except DataLoadError as e:
             logger.warning(f"Could not load face data: {e}")
 
@@ -458,8 +697,22 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
     # CustomTables sidecar and the custom data-class CSVs.
     custom_dir = session_dir / f"{metadata.session_id}_CustomTables"
     if not custom_dir.is_dir():
-        # Custom tables are optional; absence is normal, not an error.
-        logger.debug("No custom tables folder for this session: %s", custom_dir)
+        # Custom tables are optional; absence is normal, not an error. A folder
+        # whose name ends like one but does not match is reported, since its
+        # tables would otherwise be ignored without a message.
+        others = sorted(
+            p.name
+            for p in session_dir.iterdir()
+            if p.is_dir() and p.name.lower().endswith("customtables")
+        )
+        if others:
+            logger.warning(
+                f"Custom tables folder(s) {others} in {session_dir} do not match the expected "
+                f"name '{custom_dir.name}' (from session_id '{metadata.session_id}'), so their "
+                "tables are not read. Rename the folder or correct session_id."
+            )
+        else:
+            logger.debug("No custom tables folder for this session: %s", custom_dir)
     custom_csvs = find_custom_class_csvs(custom_dir, metadata.session_id)
     custom_tables_data = {name: load_custom_class_csv(p) for name, p in custom_csvs.items()}
 
@@ -500,6 +753,9 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
                         len(df),
                         custom_dir,
                     )
+
+    if raw_events is None:
+        _report_missing_events(session_dir, config.events_data_pattern, bool(custom_tables_data))
 
     # Create session
     session = Session(

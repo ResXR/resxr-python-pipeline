@@ -26,6 +26,12 @@ import numpy as np
 _logger = logging.getLogger(__name__)
 
 
+def preview(items: list[str], limit: int = 10) -> str:
+    """Up to *limit* items, comma-separated, with the number left out."""
+    text = ", ".join(items[:limit])
+    return text + (f", ... ({len(items) - limit} more)" if len(items) > limit else "")
+
+
 def format_duration(seconds: float) -> str:
     """
     Format duration in seconds to human-readable string.

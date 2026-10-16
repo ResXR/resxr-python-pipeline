@@ -7,7 +7,10 @@ Handles writing BIDS-compliant TSV and JSON files.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -213,20 +216,79 @@ def write_bids_events(
         raise BIDSWriteError(f"Failed to write events JSON sidecar: {e}") from e
 
 
+def _clear_read_only(path: Path) -> None:
+    """Clear the read-only attribute (Windows) or add the owner's write bit."""
+    os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
+
+
+def _retry_read_only(func, path, error) -> None:
+    """rmtree error handler: clear a read-only file or folder and delete it again."""
+    if func not in (os.unlink, os.remove, os.rmdir):
+        raise error if isinstance(error, BaseException) else error[1]
+    _clear_read_only(Path(path))
+    func(path)
+
+
+def remove_path(path: Path) -> None:
+    """Delete a file or a folder tree, including files marked read-only.
+
+    Raises OSError when a file or folder still cannot be deleted.
+    """
+    path = Path(path)
+    if path.is_dir() and not path.is_symlink():
+        if sys.version_info >= (3, 12):
+            shutil.rmtree(path, onexc=_retry_read_only)
+        else:
+            shutil.rmtree(path, onerror=_retry_read_only)
+        return
+    try:
+        path.unlink()
+    except PermissionError:
+        _clear_read_only(path)
+        path.unlink()
+
+
+def _is_input(session_dir: Path, dest_dir: Path) -> bool:
+    """Whether *dest_dir* is the session's input folder itself."""
+    return Path(dest_dir).resolve() == Path(session_dir).resolve()
+
+
+def will_copy_sourcedata(session_dir: Path, dest_dir: Path, overwrite: bool) -> bool:
+    """Whether ``copy_sourcedata`` copies into *dest_dir*.
+
+    It does not when *dest_dir* is the input folder itself, nor into a
+    non-empty *dest_dir* without *overwrite*.
+    """
+    dest_dir = Path(dest_dir)
+    if _is_input(session_dir, dest_dir):
+        return False
+    return overwrite or not (dest_dir.exists() and any(dest_dir.iterdir()))
+
+
 def copy_sourcedata(session_dir: Path, dest_dir: Path, overwrite: bool = False) -> None:
     """Copy a raw session directory verbatim into sourcedata/.
 
     Verbatim only — no transformation, no filtering. If dest exists and is
     non-empty, skip (and warn) unless overwrite=True, so a re-run never clobbers
-    a previously verified copy.
+    a previously verified copy. With overwrite, destination files marked
+    read-only are made writable first, so that they can be replaced. When
+    *dest_dir* is the input folder itself (the session is read from
+    sourcedata/), nothing is copied.
     """
     dest_dir = Path(dest_dir)
-    if dest_dir.exists() and any(dest_dir.iterdir()) and not overwrite:
+    if _is_input(session_dir, dest_dir):
+        logger.info(f"sourcedata is the input folder; nothing copied ({dest_dir})")
+        return
+    if not will_copy_sourcedata(session_dir, dest_dir, overwrite):
         logger.warning(
             "sourcedata dest %s already exists and is non-empty; skipping copy "
             "(set output.overwrite=true to re-copy).",
             dest_dir,
         )
         return
+    if dest_dir.exists():
+        for path in dest_dir.rglob("*"):
+            if path.is_file() and not os.access(path, os.W_OK):
+                _clear_read_only(path)
     shutil.copytree(session_dir, dest_dir, dirs_exist_ok=True)
     logger.debug("Copied sourcedata: %s -> %s", session_dir, dest_dir)

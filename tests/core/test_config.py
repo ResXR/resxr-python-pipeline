@@ -28,6 +28,12 @@ from resxr.core.exceptions import ConfigurationError
 
 
 class TestFromYaml:
+    def test_shipped_config_loads(self):
+        """The configuration used by the README command loads successfully."""
+        path = Path(__file__).resolve().parents[2] / "config" / "pipeline_config.yaml"
+        cfg = PipelineConfig.from_yaml(path)
+        assert cfg.validation.settings == {}
+
     def test_valid_config_loads_successfully(self, tmp_config_yaml):
         """A valid YAML file produces a PipelineConfig without errors."""
         cfg = PipelineConfig.from_yaml(tmp_config_yaml)
@@ -122,6 +128,71 @@ class TestFromYaml:
         path.write_text(yaml.dump(minimal_config_dict))
         with pytest.raises(ConfigurationError, match="Duplicate"):
             PipelineConfig.from_yaml(path)
+
+
+_MAPPING_WITH_A_TYPO = {
+    "source_dir": "session_001",
+    "subject_id": "01",
+    "session_label": "01",
+    "subjet_id": "01",
+}
+
+
+class TestUnknownKeys:
+    """A key the configuration does not define is an error at every level."""
+
+    @staticmethod
+    def _load(tmp_path, config: dict) -> PipelineConfig:
+        path = tmp_path / "cfg.yaml"
+        path.write_text(yaml.dump(config), encoding="utf-8")
+        return PipelineConfig.from_yaml(path)
+
+    @pytest.mark.parametrize(
+        ("edit", "location"),
+        [
+            (
+                lambda cfg: cfg["preprocessing"].update(apply_quality_maskin=True),
+                "preprocessing.apply_quality_maskin",
+            ),
+            (lambda cfg: cfg.update(systems={"Head": {"enable": True}}), "systems.Head.enable"),
+            (
+                lambda cfg: cfg.update(session_mappings=[_MAPPING_WITH_A_TYPO]),
+                "session_mappings.0.subjet_id",
+            ),
+            (
+                lambda cfg: cfg["bids"]["reference_frame"].update(rotation_ordr="XYZ"),
+                "bids.reference_frame.rotation_ordr",
+            ),
+        ],
+    )
+    def test_unknown_nested_key_names_the_key_and_its_location(
+        self, tmp_path, minimal_config_dict, edit, location
+    ):
+        edit(minimal_config_dict)
+        with pytest.raises(ConfigurationError) as excinfo:
+            self._load(tmp_path, minimal_config_dict)
+        assert f"{location}\n  Extra inputs are not permitted" in str(excinfo.value)
+
+    def test_unknown_top_level_key_names_the_key_and_the_known_keys(
+        self, tmp_path, minimal_config_dict
+    ):
+        minimal_config_dict["outputs"] = {"bids_root": "elsewhere"}
+        with pytest.raises(ConfigurationError) as excinfo:
+            self._load(tmp_path, minimal_config_dict)
+        message = str(excinfo.value)
+        assert "outputs\n  Extra inputs are not permitted" in message
+        assert (
+            "Unknown top-level key(s) ['outputs']; check for typos. Known top-level keys: "
+            "['bids', 'device', 'input', 'output', 'preprocessing', 'report', "
+            "'sampling_frequencies', 'session_mappings', 'system_descriptions', 'systems', "
+            "'validation']"
+        ) in message
+
+    def test_a_settings_key_is_not_checked_when_loading(self, tmp_path, minimal_config_dict):
+        """Loading accepts any key in validation.settings; validate_config checks the keys."""
+        minimal_config_dict["validation"]["settings"] = {"no_check_reads_this": 1}
+        config = self._load(tmp_path, minimal_config_dict)
+        assert config.validation.settings == {"no_check_reads_this": 1}
 
 
 class TestConfigFields:

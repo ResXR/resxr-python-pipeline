@@ -118,10 +118,38 @@
                     <th>Warnings</th>
                     <td>{{ total_warnings }}</td>
                 </tr>
+                {% if hand_joint_frames %}
+                <tr>
+                    <th>Hand joint frame</th>
+                    <td>{{ hand_joint_frames }}</td>
+                </tr>
+                {% endif %}
             </table>
         </section>
 
-        <section class="streams">
+        {% if checks_not_run %}<section class="flags" id="checks-not-run">
+            <h2>Checks not run ({{ checks_not_run|length }})</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Check</th>
+                        <th>Stream</th>
+                        <th>Reason</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for c in checks_not_run %}
+                    <tr>
+                        <td>{{ c.check }}</td>
+                        <td>{{ c.stream }}</td>
+                        <td>{{ c.reason }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+
+        {% endif %}<section class="streams">
             <h2>Tracking Streams</h2>
             <table>
                 <thead>

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
+import numpy as np
 import pandas as pd
 import pytest
 
 from resxr.core.constants import TrackingSystem
+from resxr.core.exceptions import ConfigurationError
 from resxr.core.session import Session, SessionMetadata, TrackingStream
 from resxr.io.splitter import is_system_enabled, split_continuous_data
+from tests.conftest import _face_df
 
 # ===========================================================================
 # Helper
@@ -186,8 +191,6 @@ class TestSplitContinuousData:
 
     def test_face_from_raw_face_data(self, session_metadata, continuous_df):
         """FACE stream is created from raw_face_data when present and face is enabled."""
-        from tests.conftest import _face_df
-
         session = _make_session(session_metadata, continuous_df)
         session.raw_face_data = _face_df()
         result = split_continuous_data(session, None, SAMPLING_FREQS)
@@ -195,9 +198,246 @@ class TestSplitContinuousData:
 
     def test_missing_sampling_freq_for_enabled_system_raises(self, session_metadata, continuous_df):
         """Enabled system without a sampling_frequency entry raises ConfigurationError."""
-        from resxr.core.exceptions import ConfigurationError
-
         session = _make_session(session_metadata, continuous_df)
         incomplete_freqs = {"Eyes": 90.0}  # missing Head, Hands
         with pytest.raises(ConfigurationError, match="sampling_frequencies"):
             split_continuous_data(session, None, incomplete_freqs)
+
+
+# ===========================================================================
+# Streams that are not exported say why
+# ===========================================================================
+
+
+class TestDroppedStreamsAreReported:
+    @staticmethod
+    def _split(session, caplog, enabled_systems=None, alternate_time_columns=None):
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            return split_continuous_data(
+                session,
+                enabled_systems,
+                SAMPLING_FREQS,
+                alternate_time_columns=alternate_time_columns,
+            )
+
+    def test_missing_enabled_key_warns_per_dropped_stream(self, continuous_df, caplog):
+        metadata = SessionMetadata(
+            session_id="test",
+            flag_problems={"hands_enabled": "hands_enabled missing"},
+        )
+        template_like = continuous_df.drop(columns=["Eyes_Closed_L", "Eyes_Closed_R"])
+        result = self._split(_make_session(metadata, template_like), caplog)
+        assert set(result) == {TrackingSystem.HEAD}
+        assert (
+            "Session 'test': Hands not exported: metadata does not mark it enabled "
+            "(hands_enabled missing); its 4 columns stay only in sourcedata/"
+        ) in caplog.text
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warnings) == 1  # Eyes is false without a problem note: INFO, not WARNING
+        assert "Eyes not exported: eyes_enabled is false in the metadata" in caplog.text
+
+    def test_enabled_stream_without_columns_warns(self, session_metadata, continuous_df, caplog):
+        no_eyes = continuous_df.drop(columns=["LeftEye_px", "LeftEye_py"])
+        result = self._split(_make_session(session_metadata, no_eyes), caplog)
+        assert TrackingSystem.EYES not in result
+        assert (
+            "Session 'test': Eyes enabled in metadata but no Eyes columns found; Eyes not exported"
+        ) in caplog.text
+
+    def test_system_disabled_in_config_with_data_is_info(
+        self, session_metadata, continuous_df, caplog
+    ):
+        self._split(_make_session(session_metadata, continuous_df), caplog, {"Hands": False})
+        (record,) = [r for r in caplog.records if "Hands not exported" in r.getMessage()]
+        assert record.levelname == "INFO"
+        assert "disabled in the config (systems.Hands.enabled)" in record.getMessage()
+
+    def test_face_enabled_without_face_file_warns_with_both_consequences(
+        self, session_metadata, continuous_df, caplog
+    ):
+        result = self._split(_make_session(session_metadata, continuous_df), caplog)
+        assert TrackingSystem.FACE not in result
+        assert (
+            "Session 'test': Face not exported: face_enabled is true but no face file was loaded"
+        ) in caplog.text
+        assert "the eyes_closed check needs the Face stream and will not run" in caplog.text
+
+    def test_missing_clock_column_warns(self, session_metadata, continuous_df, caplog):
+        self._split(
+            _make_session(session_metadata, continuous_df),
+            caplog,
+            alternate_time_columns={"Hands": "Node_HandLeft_Time"},
+        )
+        assert (
+            "Session 'test': clock column 'Node_HandLeft_Time' for Hands "
+            "(preprocessing.alternate_time_columns) not found in the continuous data; Hands "
+            "is timed by timeSinceStartup alone"
+        ) in caplog.text
+
+    def test_continuous_data_without_head_columns_warns(
+        self, session_metadata, continuous_df, caplog
+    ):
+        head = [c for c in continuous_df.columns if c.startswith("Node_Head_")]
+        result = self._split(
+            _make_session(session_metadata, continuous_df.drop(columns=head)), caplog
+        )
+        assert TrackingSystem.HEAD not in result
+        assert (
+            "Session 'test': no Head columns found in the continuous data; Head not exported"
+        ) in caplog.text
+
+    def test_face_file_without_rows_warns(self, session_metadata, continuous_df, caplog):
+        session = _make_session(session_metadata, continuous_df)
+        session.raw_face_data = _face_df().iloc[:0]
+        result = self._split(session, caplog)
+        assert TrackingSystem.FACE not in result
+        assert "Session 'test': Face not exported: the face file has no data rows" in caplog.text
+
+    def test_face_file_with_face_enabled_missing_warns(self, continuous_df, caplog):
+        metadata = SessionMetadata(
+            session_id="test",
+            hands_enabled=True,
+            eyes_enabled=True,
+            flag_problems={"face_enabled": "face_enabled missing"},
+        )
+        session = _make_session(metadata, continuous_df)
+        session.raw_face_data = _face_df()
+        result = self._split(session, caplog)
+        assert TrackingSystem.FACE not in result
+        (record,) = [r for r in caplog.records if "Face not exported" in r.getMessage()]
+        assert record.levelname == "WARNING"
+        assert record.getMessage() == (
+            "Session 'test': Face not exported: metadata does not mark it enabled "
+            "(face_enabled missing); the face file stays only in sourcedata/"
+        )
+
+    def test_face_file_without_its_clock_column_warns(
+        self, session_metadata, continuous_df, caplog
+    ):
+        session = _make_session(session_metadata, continuous_df)
+        session.raw_face_data = _face_df()  # no Face_Time column
+        result = self._split(session, caplog, alternate_time_columns={"Face": "Face_Time"})
+        assert TrackingSystem.FACE in result  # timed by timeSinceStartup instead
+        (record,) = [r for r in caplog.records if "clock column" in r.getMessage()]
+        assert record.levelname == "WARNING"
+        assert record.getMessage() == (
+            "Session 'test': clock column 'Face_Time' for Face "
+            "(preprocessing.alternate_time_columns) not found in the face file; Face is timed "
+            "by timeSinceStartup alone, and the checks that need a separate timeSinceStartup "
+            "column will not run on it"
+        )
+
+    def test_valid_session_has_no_warning(self, session_metadata, continuous_df, caplog):
+        template_like = continuous_df.drop(columns=["Eyes_Closed_L", "Eyes_Closed_R"])
+        session = _make_session(session_metadata, template_like)
+        session.raw_face_data = _face_df()
+        self._split(session, caplog)
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+    def test_columns_no_stream_takes_are_listed_in_one_warning(
+        self, session_metadata, continuous_df, caplog
+    ):
+        extra = continuous_df.assign(
+            Pupil_Left_Diameter=3.1,
+            EDA_uS=0.5,
+            Custom_Cube_px=0.0,
+            Node_Head_Time=continuous_df["timestamp"],
+        )
+        result = self._split(
+            _make_session(session_metadata, extra),
+            caplog,
+            alternate_time_columns={"Head": "Node_Head_Time"},
+        )
+        warnings = [r.getMessage() for r in caplog.records if "column(s) of" in r.getMessage()]
+        assert warnings == [
+            "Session 'test': 4 column(s) of the continuous data are not exported to BIDS "
+            "(they stay in sourcedata/): 2 match no tracking-system prefix "
+            "(Pupil_Left_Diameter, EDA_uS); 2 have a Face prefix, but Face is read only from "
+            "the face file (Eyes_Closed_L, Eyes_Closed_R)"
+        ]
+        assert (
+            "Session 'test': 1 Custom_ column(s) (custom transforms) are not exported to BIDS "
+            "motion files; they stay in sourcedata/ (Custom_Cube_px)"
+        ) in caplog.text
+        for stream in result.values():  # routing is unchanged
+            assert "Pupil_Left_Diameter" not in stream.data.columns
+
+    def test_long_column_lists_are_cut_at_ten_names(self, session_metadata, continuous_df, caplog):
+        extra = continuous_df.drop(columns=["Eyes_Closed_L", "Eyes_Closed_R"]).assign(
+            **{f"Lab_{i:02d}": 0.0 for i in range(12)}
+        )
+        self._split(_make_session(session_metadata, extra), caplog)
+        assert "12 match no tracking-system prefix (Lab_00, " in caplog.text
+        assert "Lab_09, ... (2 more))" in caplog.text
+
+
+# ===========================================================================
+# A stream's own clock column is checked (milliseconds, backward steps)
+# ===========================================================================
+
+
+class TestStreamClocksAreChecked:
+    @staticmethod
+    def _split(session_metadata, continuous_df, caplog, hands_clock, face_clock=None):
+        session = _make_session(
+            session_metadata, continuous_df.assign(Node_HandLeft_Time=hands_clock)
+        )
+        face = _face_df().drop(columns="timeSinceStartup")  # as load_face_data returns it
+        session.raw_face_data = face.assign(
+            Face_Time=face_clock if face_clock is not None else face["timestamp"] + 50.0
+        )
+        clocks = {"Hands": "Node_HandLeft_Time", "Face": "Face_Time"}
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            streams = split_continuous_data(
+                session, None, SAMPLING_FREQS, alternate_time_columns=clocks
+            )
+        np.testing.assert_array_equal(  # never converted or sorted
+            streams[TrackingSystem.HANDS].data["timestamp"].to_numpy(), hands_clock
+        )
+        return [r.getMessage() for r in caplog.records if "clock column" in r.getMessage()]
+
+    @staticmethod
+    def _sdk_clock(n: int = 200, start: float = 589456.25):
+        """An SDK clock as the template writes it: new samples at 72 Hz, rows at 90 Hz."""
+        clock = start + np.floor(np.arange(n) * 72.0 / 90.0) / 72.0
+        clock[:5] = 0.0  # not tracked yet: leading zeros are normal
+        return clock
+
+    def test_a_valid_clock_with_repeated_values_and_edge_zeros_is_silent(
+        self, session_metadata, continuous_df, caplog
+    ):
+        clock = self._sdk_clock()
+        clock[100:103] = np.nan  # empty cells are left to the clock_dropout check
+        clock[150:152] = 0.0  # as are zeros between valid values
+        face = np.repeat(1000.0 + np.arange(100) / 30.0, 2)  # each face sample in 2 rows
+        assert self._split(session_metadata, continuous_df, caplog, clock, face) == []
+
+    def test_milliseconds_are_reported_naming_the_column(
+        self, session_metadata, continuous_df, caplog
+    ):
+        clock = self._sdk_clock() * 1000.0
+        assert self._split(session_metadata, continuous_df, caplog, clock) == [
+            "Session 'test': clock column 'Node_HandLeft_Time' for Hands has a median step of "
+            "13.89, so the column looks like milliseconds or Hands was sampled slower than 2 Hz. "
+            "It is read as seconds and not converted: if it holds milliseconds, the Hands "
+            "latency and effective sampling rate will be wrong. Write it in seconds"
+        ]
+
+    def test_backward_steps_are_counted_naming_the_column(
+        self, session_metadata, continuous_df, caplog
+    ):
+        clock = self._sdk_clock()
+        clock[100:140] = clock[100:140][::-1]
+        assert self._split(session_metadata, continuous_df, caplog, clock) == [
+            "Session 'test': clock column 'Node_HandLeft_Time' for Hands goes backward 31 "
+            "time(s). Rows are kept in file order, so the Hands latency decreases there; sort "
+            "the rows if they were written out of order"
+        ]
+
+    def test_the_face_clock_is_checked_too(self, session_metadata, continuous_df, caplog):
+        face = 1000.0 * (1000.0 + np.repeat(np.arange(100) / 30.0, 2))
+        messages = self._split(session_metadata, continuous_df, caplog, self._sdk_clock(), face)
+        assert [m.split(" has a median step of ")[0] for m in messages] == [
+            "Session 'test': clock column 'Face_Time' for Face"
+        ]
+        assert "33.33, so the column looks like milliseconds or Face was sampled" in messages[0]

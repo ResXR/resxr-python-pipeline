@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from ..core.config import ValidationConfig
-from ..core.constants import TrackingSystem
+from ..core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ..core.logger import get_logger
 from ..core.session import QualityFlag, Session, TrackingStream
 
@@ -31,11 +31,18 @@ class ValidationCheck(Protocol):
         Multi-stream checks will only run once (when processing the first
         stream in the list) and can access other streams via session.get_stream().
         If not set, check runs independently on each stream.
+    settings_keys : tuple[str, ...]
+        The ``validation.settings`` keys this check reads (with
+        ``config.get(key, default)``). A check that reads a settings key must
+        declare it: a key under ``validation.settings`` that no registered check
+        declares is a configuration error. A check without this attribute reads
+        no settings key.
     """
 
     name: str
     description: str
     required_streams: list[TrackingSystem] | None
+    settings_keys: tuple[str, ...] = ()
 
     def __call__(
         self, stream: TrackingStream, session: Session, config: ValidationConfig
@@ -54,7 +61,6 @@ class CheckRegistry:
 
     def __init__(self):
         self._checks: dict[str, ValidationCheck] = {}
-        self._failed_checks: list[tuple[str, str, str]] = []
 
     def register(self, check: ValidationCheck) -> None:
         """
@@ -123,11 +129,28 @@ class CheckRegistry:
                 if required_streams:
                     # Multi-stream check: verify all required streams exist
                     missing = [s for s in required_streams if not session.has_stream(s)]
-                    if missing:
+                    expected = [s for s in missing if s not in session.systems_off]
+                    if missing and not expected:
+                        # Off on purpose (config or metadata): not a check not run
+                        names = ", ".join(s.value for s in missing)
                         logger.debug(
-                            f"Skipping check '{check.name}': missing required "
-                            f"streams {[s.value for s in missing]}"
+                            f"Session '{session.session_id}': check '{check.name}' "
+                            f"skipped: {names} turned off in the config or the metadata"
                         )
+                        continue
+                    if expected:
+                        names = ", ".join(s.value for s in expected)
+                        why = "; ".join(
+                            session.streams_absent[s]
+                            for s in expected
+                            if s in session.streams_absent
+                        )
+                        reason = f"the session has no {names} stream" + (f" ({why})" if why else "")
+                        if session.record_check_not_run(check.name, names, reason):
+                            logger.info(
+                                f"Session '{session.session_id}': check '{check.name}' "
+                                f"not run: {reason}"
+                            )
                         continue
 
                     # Only run when processing the first required stream
@@ -147,14 +170,15 @@ class CheckRegistry:
                 )
             except Exception as e:
                 logger.error(
-                    "Check '%s' failed on %s — no flags produced for this "
+                    "Session '%s': check '%s' failed on %s — no flags produced for this "
                     "check. Downstream derivative data may contain unmasked "
                     "bad segments. Error: %s",
+                    session.session_id,
                     check.name,
                     stream.system.value,
                     e,
                 )
-                self._failed_checks.append((check.name, stream.system.value, str(e)))
+                session.record_check_not_run(check.name, stream.system.value, f"failed: {e}")
 
         return flags
 
@@ -164,17 +188,40 @@ class CheckRegistry:
         return list(self._checks.keys())
 
     @property
-    def failed_checks(self) -> list[tuple[str, str, str]]:
-        """List of (check_name, system, error) for checks that raised."""
-        return list(self._failed_checks)
-
-    def clear_failed_checks(self) -> None:
-        """Reset the failed-checks list. Call between sessions in batch runs."""
-        self._failed_checks.clear()
+    def settings_keys(self) -> list[str]:
+        """The ``validation.settings`` keys the registered checks declare, sorted."""
+        keys: set[str] = set()
+        for check in self._checks.values():
+            declared = getattr(check, "settings_keys", None) or ()
+            keys.update([declared] if isinstance(declared, str) else declared)
+        return sorted(keys)
 
 
 # Global registry instance
 check_registry = CheckRegistry()
+
+# Why a check cannot place flags on a stream without its own timeSinceStartup column
+_NO_GLOBAL_CLOCK = (
+    "no separate timeSinceStartup column (the stream has no per-system clock column; see "
+    "preprocessing.alternate_time_columns)"
+)
+
+
+def has_global_clock(check: str, stream: TrackingStream, session: Session) -> bool:
+    """Whether *stream* keeps timeSinceStartup next to its own clock.
+
+    Flags are placed on timeSinceStartup, which a stream keeps as a separate
+    column only when it has a per-system clock. Without it, the check logs an
+    ERROR, is recorded as not run on the stream, and should return no flags.
+    """
+    if GLOBAL_CLOCK_COLUMN in stream.data.columns:
+        return True
+    logger.error(
+        f"Session '{session.session_id}': {check} not run on {stream.system.value}: "
+        f"{_NO_GLOBAL_CLOCK}, so it can place no flags"
+    )
+    session.record_check_not_run(check, stream.system.value, _NO_GLOBAL_CLOCK)
+    return False
 
 
 def register_check(check: ValidationCheck) -> ValidationCheck:
@@ -185,6 +232,7 @@ def register_check(check: ValidationCheck) -> ValidationCheck:
         @register_check
         class MyCheck:
             name = "my_check"
+            settings_keys = ("my_check_threshold",)  # validation.settings keys it reads
             ...
     """
     check_registry.register(check)

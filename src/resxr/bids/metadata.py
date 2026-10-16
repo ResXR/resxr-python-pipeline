@@ -144,7 +144,9 @@ def generate_motion_json(
     return metadata
 
 
-def generate_channels_json(bids_config: BIDSConfig) -> dict[str, Any]:
+def generate_channels_json(
+    bids_config: BIDSConfig, include_tracking_space: bool = False
+) -> dict[str, Any]:
     """
     Generate _channels.json sidecar with reference frame specification.
 
@@ -152,6 +154,8 @@ def generate_channels_json(bids_config: BIDSConfig) -> dict[str, Any]:
     ----------
     bids_config : BIDSConfig
         BIDS specification configuration (from config)
+    include_tracking_space : bool
+        Add the "tracking_space" level (when the channels.tsv uses it)
 
     Returns
     -------
@@ -159,17 +163,26 @@ def generate_channels_json(bids_config: BIDSConfig) -> dict[str, Any]:
         JSON-serializable metadata dictionary
     """
     ref = bids_config.reference_frame
+    levels = {
+        "global": {
+            "Description": ref.description,
+            "RotationRule": ref.rotation_rule,
+            "RotationOrder": ref.rotation_order,
+            "SpatialAxes": ref.spatial_axes,
+        }
+    }
+    if include_tracking_space:
+        ts = bids_config.tracking_space_reference_frame
+        levels["tracking_space"] = {
+            "Description": ts.description,
+            "RotationRule": ts.rotation_rule,
+            "RotationOrder": ts.rotation_order or ref.rotation_order,
+            "SpatialAxes": ts.spatial_axes,
+        }
     return {
         "reference_frame": {
             "Description": ref.description,
-            "Levels": {
-                "global": {
-                    "Description": ref.description,
-                    "RotationRule": ref.rotation_rule,
-                    "RotationOrder": ref.rotation_order,
-                    "SpatialAxes": ref.spatial_axes,
-                }
-            },
+            "Levels": levels,
         }
     }
 

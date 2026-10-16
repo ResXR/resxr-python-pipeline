@@ -403,3 +403,19 @@ class TestGenerateChannelsJson:
         result = generate_channels_json(_bids_config())
         global_level = result["reference_frame"]["Levels"]["global"]
         assert global_level["SpatialAxes"] == "RAS"
+
+    def test_tracking_space_level_only_when_used(self):
+        """The tracking_space level is added on request, with the global RotationOrder."""
+        assert set(generate_channels_json(_bids_config())["reference_frame"]["Levels"]) == {
+            "global"
+        }
+        levels = generate_channels_json(_bids_config(), include_tracking_space=True)[
+            "reference_frame"
+        ]["Levels"]
+        assert levels["tracking_space"] == {
+            "Description": "Meta tracking space as returned by the SDK: OpenXR right-handed "
+            "axes, +X right, +Y up, -Z forward.",
+            "RotationRule": "right-hand",
+            "RotationOrder": "XYZ",
+            "SpatialAxes": "RSP",
+        }

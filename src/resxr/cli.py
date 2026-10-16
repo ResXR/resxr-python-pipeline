@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import pipeline
+from .core.exceptions import ConfigurationError
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -28,7 +29,10 @@ Examples:
   resxr --config my_config.yaml --dry-run
   resxr --version
 
-For more information, see: https://github.com/ResXR/ResXR
+Exit status: 0 when every session was processed; 1 when a session was
+skipped, no session was found, or the configuration is invalid.
+
+For more information, see: https://github.com/ResXR/resxr-python-pipeline
         """,
     )
 
@@ -56,7 +60,7 @@ For more information, see: https://github.com/ResXR/ResXR
         "-q",
         "--quiet",
         action="store_true",
-        help="Suppress all output except errors.",
+        help="Show errors only; warnings and the run summary are hidden.",
     )
 
     parser.add_argument(
@@ -84,7 +88,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     Returns
     -------
     int
-        Exit code (0 for success, non-zero for errors)
+        Exit code: 0 when every session found was processed; 1 when a session
+        was skipped, no session was found, or the configuration is invalid;
+        130 when interrupted.
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -114,9 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.dry_run:
         logger.info("Dry run mode - validating configuration...")
         try:
-            from .core.config import PipelineConfig
-
-            config = PipelineConfig.from_yaml(config_path)
+            config = pipeline.load_config(config_path)
             logger.info(f"Configuration valid: {config_path}")
             logger.info(f"  Input directory: {config.input.data_dir}")
             logger.info(f"  Output directory: {config.output.bids_root}")
@@ -124,16 +128,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             logger.info(f"  Enabled systems: {[k for k, v in config.systems.items() if v.enabled]}")
             return 0
         except Exception as e:
-            logger.error(f"Configuration error: {e}")
+            logger.error(f"Configuration error in {config_path}: {e}")
             return 1
 
-    # Run pipeline
+    # Run pipeline: exit 1 when a session was skipped or no session was found
     try:
-        pipeline.run(config_path=str(config_path))
-        return 0
+        result = pipeline.run(config_path=str(config_path))
+        return result.exit_code
     except KeyboardInterrupt:
         logger.info("Pipeline interrupted by user")
         return 130
+    except ConfigurationError as e:
+        logger.error(f"Configuration error in {config_path}: {e}")
+        return 1
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
         if args.verbose:

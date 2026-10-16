@@ -15,9 +15,16 @@ import pandas as pd
 
 from ..utils import find_first_nonzero_index, find_last_nonzero_index, find_recording_onset
 from .constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
+from .exceptions import DataLoadError
 from .logger import get_logger
 
 logger = get_logger(__name__)
+
+# Names the column behind a stream's internal 'timestamp' in timing errors.
+_CLOCK_HINT = (
+    " (the stream's clock: its column in preprocessing.alternate_time_columns if the data "
+    "have it, otherwise timeSinceStartup)"
+)
 
 
 @dataclass
@@ -213,6 +220,15 @@ class CustomTableSchema:
     columns: list[ColumnInfoEntry]
 
 
+@dataclass(frozen=True)
+class CheckNotRun:
+    """An enabled quality check that produced no result for a stream, and why."""
+
+    check: str
+    stream: str
+    reason: str
+
+
 @dataclass
 class SessionMetadata:
     """
@@ -236,6 +252,13 @@ class SessionMetadata:
     hands_enabled: bool = False
     eyes_enabled: bool = False
     controllers_enabled: bool = False
+
+    # Flags that were absent or not true/false in the file and so read as False
+    # (key -> reason, e.g. "hands_enabled missing"); used to explain dropped streams.
+    flag_problems: dict[str, str] = field(default_factory=dict)
+
+    # Flags written as JSON false in the file: streams turned off on purpose.
+    false_flags: set[str] = field(default_factory=set)
 
     # Number of columns allocated in the CSV schema at session start (a
     # compile-time constant, not a live device measurement). Kept for
@@ -295,26 +318,41 @@ class TrackingStream:
         return find_recording_onset(self.data["timestamp"].values)
 
     def _compute_effective_rate(self) -> None:
-        """Effective sampling rate from unique timestamps (start = first non-zero)."""
+        """Effective sampling rate from unique timestamps (start = first non-zero).
+
+        Raises DataLoadError when the stream cannot be timed, so the pipeline
+        skips that session and continues with the others.
+        """
         if "timestamp" not in self.data.columns:
-            raise ValueError(f"Stream {self.system.value}: missing 'timestamp' column")
+            raise DataLoadError(
+                f"Stream {self.system.value}: missing 'timestamp' column{_CLOCK_HINT}"
+            )
+        for column in ("timestamp", GLOBAL_CLOCK_COLUMN):
+            if column in self.data.columns and not pd.api.types.is_numeric_dtype(self.data[column]):
+                raise DataLoadError(
+                    f"Stream {self.system.value}: non-numeric value in '{column}' column"
+                    + (_CLOCK_HINT if column == "timestamp" else "")
+                )
         if len(self.data) < 2:
-            raise ValueError(
+            raise DataLoadError(
                 f"Stream {self.system.value}: need at least 2 rows to compute effective rate (got {len(self.data)})"
             )
         start = self._start_timestamp()
         if start is None:
-            raise ValueError(f"Stream {self.system.value}: no non-zero timestamp found")
+            raise DataLoadError(
+                f"Stream {self.system.value}: no non-zero timestamp found{_CLOCK_HINT}"
+            )
         u = np.unique(self.data["timestamp"].values)
         u = u[u >= start]
         if u.size < 2:
-            raise ValueError(
+            raise DataLoadError(
                 f"Stream {self.system.value}: fewer than 2 unique timestamps from first non-zero"
+                f"{_CLOCK_HINT}"
             )
         total = u[-1] - u[0]
         if total <= 0:
-            raise ValueError(
-                f"Stream {self.system.value}: invalid timestamp span (total time <= 0)"
+            raise DataLoadError(
+                f"Stream {self.system.value}: invalid timestamp span (total time <= 0){_CLOCK_HINT}"
             )
         self.sampling_frequency_effective = (u.size - 1) / total
 
@@ -360,6 +398,11 @@ class TrackingStream:
         return self.clean_data if self.clean_data is not None else self.data
 
 
+def _first_valid_sample(values: pd.Series) -> float | None:
+    """First finite, nonzero value of a clock column, or None if it has none."""
+    return find_recording_onset(pd.to_numeric(values, errors="coerce").to_numpy(dtype=float))
+
+
 @dataclass
 class Session:
     """
@@ -387,8 +430,48 @@ class Session:
     # Filled by merge_events just before BIDS events are written
     merged_events_data: pd.DataFrame | None = None
 
+    # Shared global clock origin, initialized once after streams are split.
+    motion_time_zero: float | None = None
+
+    # Frame of each hand's XRHand joint poses ("Left"/"Right" -> reference_frame level)
+    hand_joint_frames: dict[str, str] = field(default_factory=dict)
+
     # Source paths for reference
     source_dir: str | None = None
+
+    # Enabled checks that produced no result for a stream (shown in the report)
+    checks_not_run: list[CheckNotRun] = field(default_factory=list)
+
+    # Systems turned off on purpose (disabled in the config, or JSON false in the
+    # metadata); a check that needs one of them is not listed in checks_not_run.
+    systems_off: set[TrackingSystem] = field(default_factory=set)
+
+    # Why an expected stream was not created (set by the splitter); named in the
+    # reason of a check that needs the stream
+    streams_absent: dict[TrackingSystem, str] = field(default_factory=dict)
+
+    def record_check_not_run(self, check: str, stream: str, reason: str) -> bool:
+        """Record that *check* produced no result for *stream*; False if already recorded."""
+        entry = CheckNotRun(check=check, stream=stream, reason=reason)
+        if entry in self.checks_not_run:
+            return False
+        self.checks_not_run.append(entry)
+        return True
+
+    def initialize_motion_time_zero(self) -> float:
+        """Set the time zero: the main data's first valid timeSinceStartup."""
+        time_zero = None
+        main = self.raw_continuous_data
+        if main is not None and "timestamp" in main.columns:
+            time_zero = _first_valid_sample(main["timestamp"])
+
+        if time_zero is None:
+            raise DataLoadError(
+                f"Session '{self.session_id}': the main continuous data has no valid "
+                f"{GLOBAL_CLOCK_COLUMN} sample."
+            )
+        self.motion_time_zero = time_zero
+        return time_zero
 
     @property
     def all_flags(self) -> list[QualityFlag]:
