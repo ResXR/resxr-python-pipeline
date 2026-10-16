@@ -25,6 +25,7 @@ _Nothing yet._
 - `latency` and `latency_global` are `n/a` in every row whose clock value is zero or not finite, also between valid values (before, only rows before the first and after the last valid value were `n/a`, and a zero inside the recording gave a negative latency).
 - With `output.overwrite: true`, a rerun replaces a `sourcedata/` copy whose files are read-only (before, every such session was skipped with "Access is denied").
 - With `report.output_dir` set, two sessions with the same `session_id` write one report file (the second replaces the first); a warning names both sessions.
+- A session read from its own copy in the output's `sourcedata/` (reprocessing from the copies) is not copied onto itself: an info line says that sourcedata is the input folder and nothing was copied (before, with `output.overwrite: true`, every such session was skipped with "are the same file").
 - A metadata `session_id` containing `/`, `\` or `..` skips its session with an error that names the key (`session_id` names the report and the custom-tables folder; before, `"../../../evil"` wrote the report outside the BIDS root).
 
 ### Changed

@@ -621,7 +621,7 @@ def _process_session(
 
     # Copy the raw session verbatim into sourcedata/ before any transformation.
     sourcedata = bids.sourcedata_session_dir(session)
-    if will_copy_sourcedata(sourcedata, config.output.overwrite):
+    if will_copy_sourcedata(source_dir, sourcedata, config.output.overwrite):
         outputs.writing(sourcedata)
     copy_sourcedata(Path(source_dir), sourcedata, overwrite=config.output.overwrite)
 

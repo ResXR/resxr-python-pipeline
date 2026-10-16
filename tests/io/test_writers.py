@@ -390,3 +390,21 @@ class TestCopySourcedata:
         (dest / "existing.csv").write_text("old")
         copy_sourcedata(src, dest, overwrite=True)
         assert (dest / "a.csv").exists()
+
+    @pytest.mark.parametrize("overwrite", [True, False])
+    def test_copies_nothing_when_dest_is_the_input_folder(self, tmp_path, caplog, overwrite):
+        import logging
+
+        from resxr.io.writers import copy_sourcedata, will_copy_sourcedata
+
+        src = tmp_path / "sourcedata" / "sub-01" / "ses-01"
+        src.mkdir(parents=True)
+        (src / "a.csv").write_text("x")
+        dest = tmp_path / "sourcedata" / "sub-01" / ".." / "sub-01" / "ses-01"  # the same folder
+        assert not will_copy_sourcedata(src, dest, overwrite)
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            copy_sourcedata(src, dest, overwrite=overwrite)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"sourcedata is the input folder; nothing copied ({dest})"
+        ]
+        assert [p.name for p in src.iterdir()] == ["a.csv"]

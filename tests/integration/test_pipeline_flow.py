@@ -1825,3 +1825,27 @@ def test_two_sessions_sharing_a_report_path_are_named(tmp_path, minimal_config_d
         "session_id, which names the report in report.output_dir"
     )
     assert [p.name for p in reports.iterdir()] == ["A_report.html"]
+
+
+def test_a_session_read_from_its_own_sourcedata_copy_is_processed(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    bids_root = tmp_path / "bids_out"
+    run(str(cfg))  # first run: sourcedata/sub-01/ses-01 holds sess_a's copy
+    copy = bids_root / "sourcedata" / "sub-01" / "ses-01"
+    before = _files(copy)
+
+    def reprocess_from_sourcedata(c):  # output.overwrite is true in this config
+        c["input"]["data_dir"] = str(bids_root / "sourcedata")
+        c["session_mappings"] = [
+            {"source_dir": "sub-01/ses-01", "subject_id": "01", "session_label": "01"}
+        ]
+
+    _edit_config(cfg, reprocess_from_sourcedata)
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert result.exit_code == 0
+    assert f"sourcedata is the input folder; nothing copied ({copy})" in caplog.text
+    assert _files(copy) == before
