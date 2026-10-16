@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import json
-import json as _json
 import logging
 
 import pandas as pd
 import pytest
 
 from resxr.core.exceptions import BIDSWriteError
+from resxr.io import writers
 from resxr.io.writers import (
     copy_sourcedata,
-    will_copy_sourcedata,
     write_bids_events,
     write_bids_tsv,
     write_channels_tsv,
@@ -325,7 +324,7 @@ class TestWriteBidsEvents:
     def test_sidecar_content_matches(self, tmp_path):
         path = tmp_path / "events.tsv"
         write_bids_events(self._wide(), path, self._sidecar())
-        assert _json.loads((tmp_path / "events.json").read_text()) == self._sidecar()
+        assert json.loads((tmp_path / "events.json").read_text()) == self._sidecar()
 
     def test_missing_required_column_raises(self, tmp_path):
         bad = pd.DataFrame({"name": ["x"], "duration": [1.0]})
@@ -382,7 +381,7 @@ class TestCopySourcedata:
         src.mkdir(parents=True)
         (src / "a.csv").write_text("x")
         dest = tmp_path / "sourcedata" / "sub-01" / ".." / "sub-01" / "ses-01"  # the same folder
-        assert not will_copy_sourcedata(src, dest, overwrite)
+        assert not writers.will_copy_sourcedata(src, dest, overwrite)
         with caplog.at_level(logging.INFO, logger="resxr"):
             copy_sourcedata(src, dest, overwrite=overwrite)
         assert [r.getMessage() for r in caplog.records] == [
