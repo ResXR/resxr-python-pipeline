@@ -25,28 +25,32 @@ logger = get_logger(__name__)
 
 # A median timeSinceStartup step above this many seconds suggests milliseconds.
 _CLOCK_STEP_LOOKS_LIKE_MS = 0.5
-# A timeSinceStartup step longer than this many median steps is reported as a gap.
-_CLOCK_GAP_MEDIAN_STEPS = 10
+# A timeSinceStartup step longer than this many expected intervals is reported as a gap.
+_CLOCK_GAP_INTERVALS = 10
 
 
-def check_clock(values: pd.Series, source: Path) -> None:
+def check_clock(values: pd.Series, source: Path, head_rate: float | None = None) -> None:
     """Warn about a timeSinceStartup column that departs from the input contract.
 
     The column must be in seconds, never step backward and have a value in every
     row. Leading and trailing zero rows are allowed (before onset and after
-    offset); a zero between valid values is counted. Steps longer than 10 times the median step
-    are reported at INFO, since valid recordings can have them. Nothing is
-    changed: the pipeline does not sort rows, convert units or interpolate. A
-    non-numeric column is left to the stream check, which skips the session.
+    offset); a zero between valid values is counted, and so is an empty, NaN or
+    infinite cell anywhere. Steps longer than 10 times the expected Head
+    interval (1 / *head_rate*, from ``sampling_frequencies``; without it, the
+    median step) are reported at INFO, since valid recordings can have them;
+    not when the column looks like milliseconds, since the gaps would then be
+    misread. Nothing is changed: the pipeline does not sort rows, convert units
+    or interpolate. A non-numeric column is left to the stream check, which
+    skips the session.
     """
     if not pd.api.types.is_numeric_dtype(values):
         return
     t = values.to_numpy(dtype=float)
-    missing = int(np.isnan(t).sum())
+    missing = int((~np.isfinite(t)).sum())
     if missing:
         logger.warning(
-            f"{source}: {missing} row(s) have no {GLOBAL_CLOCK_COLUMN} value (empty or NaN); "
-            "their global latency is n/a"
+            f"{source}: {missing} row(s) have no {GLOBAL_CLOCK_COLUMN} value (empty, NaN or "
+            "infinite); their global latency is n/a"
         )
     has_time = np.isfinite(t) & (t != 0)
     valid = t[has_time]
@@ -75,16 +79,23 @@ def check_clock(values: pd.Series, source: Path) -> None:
             "as seconds and not converted: if it holds milliseconds, latencies, flag times and "
             "event onsets will be wrong. Write it in seconds"
         )
-    if median_step > 0:
-        gaps = np.flatnonzero(steps > _CLOCK_GAP_MEDIAN_STEPS * median_step)
-        if gaps.size:
-            longest = gaps[np.argmax(steps[gaps])]
-            logger.info(
-                f"{source}: {GLOBAL_CLOCK_COLUMN} has {gaps.size} gap(s) longer than "
-                f"{_CLOCK_GAP_MEDIAN_STEPS} times the median step ({median_step:.4f} s); the "
-                f"longest is {steps[longest]:.2f} s, after {GLOBAL_CLOCK_COLUMN} "
-                f"{valid[longest]:.2f}. Rows are not interpolated."
-            )
+        return  # gaps in seconds would be misread
+    if head_rate:
+        interval = 1.0 / head_rate
+        reference = f"the expected Head interval ({interval:.4f} s)"
+    else:
+        interval = median_step
+        reference = f"its median step ({interval:.4f} s; sampling_frequencies has no Head rate)"
+    if interval <= 0:
+        return
+    gaps = np.flatnonzero(steps > _CLOCK_GAP_INTERVALS * interval)
+    if gaps.size:
+        longest = gaps[np.argmax(steps[gaps])]
+        logger.info(
+            f"{source}: {GLOBAL_CLOCK_COLUMN} has {gaps.size} gap(s) longer than "
+            f"{_CLOCK_GAP_INTERVALS} times {reference}; the longest is {steps[longest]:.2f} s, "
+            f"after {GLOBAL_CLOCK_COLUMN} {valid[longest]:.2f}. Rows are not interpolated."
+        )
 
 
 def check_stream_clock(values: pd.Series, session_id: str, system: str, column: str) -> None:
@@ -118,7 +129,7 @@ def check_stream_clock(values: pd.Series, session_id: str, system: str, column: 
         )
 
 
-def load_continuous_data(csv_path: Path) -> pd.DataFrame:
+def load_continuous_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFrame:
     """
     Load ContinuousData CSV with proper dtype handling.
 
@@ -126,6 +137,9 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
     ----------
     csv_path : Path
         Path to ContinuousData CSV file
+    head_rate : float, optional
+        Expected Head sampling rate (Hz); sets the reference for the gap line of
+        ``check_clock``
 
     Returns
     -------
@@ -168,12 +182,12 @@ def load_continuous_data(csv_path: Path) -> pd.DataFrame:
             f"a header row that includes {GLOBAL_CLOCK_COLUMN}"
         )
 
-    check_clock(df["timestamp"], csv_path)
+    check_clock(df["timestamp"], csv_path, head_rate)
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
     return df
 
 
-def load_face_data(csv_path: Path) -> pd.DataFrame:
+def load_face_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFrame:
     """
     Load FaceExpressionData CSV with proper boolean/float handling.
 
@@ -181,6 +195,8 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
     ----------
     csv_path : Path
         Path to FaceExpressionData CSV file
+    head_rate : float, optional
+        Expected Head sampling rate (Hz), as for ``load_continuous_data``
 
     Returns
     -------
@@ -210,7 +226,7 @@ def load_face_data(csv_path: Path) -> pd.DataFrame:
     elif f"\ufeff{GLOBAL_CLOCK_COLUMN}" in df.columns:
         df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
     if "timestamp" in df.columns:
-        check_clock(df["timestamp"], csv_path)
+        check_clock(df["timestamp"], csv_path, head_rate)
 
     if "Face_Status" in df.columns:
         if df["Face_Status"].dtype == object:
@@ -596,7 +612,7 @@ def _report_missing_events(session_dir: Path, pattern: str, has_custom_tables: b
         logger.info(f"No events file matching '{pattern}' in {session_dir}; {consequence}.")
 
 
-def load_session(session_dir: Path, config: InputConfig) -> Session:
+def load_session(session_dir: Path, config: InputConfig, head_rate: float | None = None) -> Session:
     """
     Load all data files from a session directory into a Session object.
 
@@ -606,6 +622,9 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
         Directory containing session data files
     config : InputConfig
         Input configuration specifying file patterns
+    head_rate : float, optional
+        Expected Head sampling rate (``sampling_frequencies.Head``), the
+        reference for the timeSinceStartup gap line (without it, the median step)
 
     Returns
     -------
@@ -643,13 +662,13 @@ def load_session(session_dir: Path, config: InputConfig) -> Session:
             f"{session_dir} (every session folder needs one; the pattern is "
             "input.continuous_data_pattern)"
         )
-    raw_continuous = load_continuous_data(files.continuous)
+    raw_continuous = load_continuous_data(files.continuous, head_rate)
 
     # Load face data (optional)
     raw_face = None
     if files.face is not None:
         try:
-            raw_face = load_face_data(files.face)
+            raw_face = load_face_data(files.face, head_rate)
         except DataLoadError as e:
             logger.warning(f"Could not load face data: {e}")
 

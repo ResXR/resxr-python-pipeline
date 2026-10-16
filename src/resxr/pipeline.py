@@ -534,7 +534,9 @@ def process_session_from_mapping(
     logger.info(f"Processing session: {source_dir}")
 
     # Load session
-    session = load_session(Path(source_dir), config.input)
+    session = load_session(
+        Path(source_dir), config.input, head_rate=config.sampling_frequencies.get("Head")
+    )
     session.subject_id = mapping.subject_id
     session.session_label = mapping.session_label
     if outputs is None:  # direct callers: track the session on its own

@@ -733,13 +733,17 @@ class TestClockDepartures:
         assert f"{path}: timeSinceStartup goes backward 9 time(s)." in caplog.text
         assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
 
-    def test_empty_clock_cells_are_counted(self, tmp_path, caplog):
+    def test_empty_and_infinite_clock_cells_are_counted(self, tmp_path, caplog):
         import numpy as np
 
         clock = 1.0 + np.arange(50) / 72.0
         clock[5:8] = np.nan
+        clock[30] = np.inf
         path, _ = self._load(tmp_path, clock, caplog)
-        assert f"{path}: 3 row(s) have no timeSinceStartup value (empty or NaN)" in caplog.text
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: 4 row(s) have no timeSinceStartup value (empty, NaN or infinite); their "
+            "global latency is n/a"
+        ]
 
     def test_zero_values_between_valid_values_are_counted(self, tmp_path, caplog):
         import numpy as np
@@ -754,29 +758,68 @@ class TestClockDepartures:
         ]
         assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
 
+    @staticmethod
+    def _gap_lines(tmp_path, clock, caplog, loader=load_continuous_data, head_rate=None):
+        import logging
+
+        path = tmp_path / "x_ContinuousData.csv"
+        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": 0.0}).to_csv(path, index=False)
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            df = loader(path, head_rate)
+        assert df["timestamp"].tolist() == pytest.approx(list(clock))  # rows kept as read
+        return path, [r for r in caplog.records if "gap(s)" in r.getMessage()]
+
     @pytest.mark.parametrize("loader", [load_continuous_data, load_face_data])
-    def test_gaps_are_reported_at_info_and_rows_kept(self, tmp_path, caplog, loader):
+    def test_gaps_are_reported_at_info_against_the_expected_head_interval(
+        self, tmp_path, caplog, loader
+    ):
         import logging
 
         import numpy as np
 
-        clock = 1.0 + np.arange(50) / 72.0  # median step 1/72 s = 0.0139 s
+        clock = 1.0 + np.arange(50) / 100.0  # rows every 10 ms
         clock[11:] += 0.3  # a 0.31 s step after row 10
-        clock[31:] += 0.5  # a 0.51 s step after row 30, at 1.0 + 30/72 + 0.3 = 1.72
+        clock[31:] += 0.5  # a 0.51 s step after row 30, at 1.0 + 0.30 + 0.3 = 1.60
+        clock[41:] += 0.12  # a 0.13 s step: shorter than 10 Head intervals (0.1389 s)
         clock = np.r_[0.0, clock, 0.0]  # zero rows (before onset, after offset) are ignored
-        path = tmp_path / "x_ContinuousData.csv"
-        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": 0.0}).to_csv(path, index=False)
-        with caplog.at_level(logging.INFO, logger="resxr"):
-            df = loader(path)
-        (record,) = [r for r in caplog.records if "gap(s)" in r.getMessage()]
+        path, (record,) = self._gap_lines(tmp_path, clock, caplog, loader, head_rate=72.0)
         assert record.levelname == "INFO"
         assert record.getMessage() == (
-            f"{path}: timeSinceStartup has 2 gap(s) longer than 10 times the median step "
-            "(0.0139 s); the longest is 0.51 s, after timeSinceStartup 1.72. "
+            f"{path}: timeSinceStartup has 2 gap(s) longer than 10 times the expected Head "
+            "interval (0.0139 s); the longest is 0.51 s, after timeSinceStartup 1.60. "
             "Rows are not interpolated."
         )
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
-        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_without_a_head_rate_the_reference_is_the_median_step(self, tmp_path, caplog):
+        import numpy as np
+
+        clock = 1.0 + np.arange(50) / 72.0  # median step 1/72 s = 0.0139 s
+        clock[11:] += 0.3
+        clock[31:] += 0.5  # at 1.0 + 30/72 + 0.3 = 1.72
+        path, (record,) = self._gap_lines(tmp_path, clock, caplog)
+        assert record.getMessage() == (
+            f"{path}: timeSinceStartup has 2 gap(s) longer than 10 times its median step "
+            "(0.0139 s; sampling_frequencies has no Head rate); the longest is 0.51 s, after "
+            "timeSinceStartup 1.72. Rows are not interpolated."
+        )
+
+    def test_rows_in_per_frame_bursts_are_not_gaps(self, tmp_path, caplog):
+        import numpy as np
+
+        frames = 1.0 + np.arange(40) / 72.0  # three rows per frame, 1 ms apart
+        clock = np.sort(np.r_[frames, frames + 0.001, frames + 0.002])
+        _, lines = self._gap_lines(tmp_path, clock, caplog, head_rate=72.0)
+        assert lines == []  # the median step (1 ms) would have made 39 "gaps"
+
+    def test_a_millisecond_clock_has_no_gap_line(self, tmp_path, caplog):
+        import numpy as np
+
+        clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
+        clock[25:] += 1000.0  # a 1 s gap, which would read as 1000 s
+        _, lines = self._gap_lines(tmp_path, clock, caplog, head_rate=72.0)
+        assert lines == []
+        assert "looks like milliseconds" in caplog.text
 
     def test_a_regular_clock_has_no_gap_line(self, tmp_path, caplog):
         import logging
