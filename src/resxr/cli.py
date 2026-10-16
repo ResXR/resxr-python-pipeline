@@ -116,10 +116,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         logger.error(f"Configuration file not found: {config_path}")
         return 1
 
-    # Dry run mode
-    if args.dry_run:
-        logger.info("Dry run mode - validating configuration...")
-        try:
+    # A dry run and a run report a configuration error and an unexpected failure alike
+    try:
+        if args.dry_run:
+            logger.info("Dry run mode - validating configuration...")
             config = pipeline.load_config(config_path)
             logger.info(f"Configuration valid: {config_path}")
             logger.info(f"  Input directory: {config.input.data_dir}")
@@ -127,14 +127,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             logger.info(f"  Session mappings: {len(config.session_mappings)}")
             logger.info(f"  Enabled systems: {[k for k, v in config.systems.items() if v.enabled]}")
             return 0
-        except Exception as e:
-            logger.error(f"Configuration error in {config_path}: {e}")
-            return 1
-
-    # Run pipeline: exit 1 when a session was skipped or no session was found
-    try:
-        result = pipeline.run(config_path=str(config_path))
-        return result.exit_code
+        # Run pipeline: exit 1 when a session was skipped or no session was found
+        return pipeline.run(config_path=str(config_path)).exit_code
     except KeyboardInterrupt:
         logger.info("Pipeline interrupted by user")
         return 130

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -241,6 +242,26 @@ class TestMainDryRun:
                 f"input.data_dir {state}: {data_dir} ({tmp_path / data_dir}; a relative path "
                 "is read from the current folder)"
             ) in caplog.text
+
+    @pytest.mark.parametrize("verbose", [False, True], ids=["default", "verbose"])
+    def test_an_unexpected_failure_is_not_called_a_configuration_error(
+        self, valid_config_yaml, caplog, capsys, monkeypatch, verbose
+    ):
+        def broken_validation(config):
+            raise TypeError("'NoneType' object is not iterable")
+
+        monkeypatch.setattr(pipeline, "validate_config", broken_validation)
+        args = ["--config", str(valid_config_yaml), "--dry-run"] + (["-v"] if verbose else [])
+        resxr_logger = logging.getLogger("resxr")
+        level, handlers = resxr_logger.level, list(resxr_logger.handlers)
+        try:
+            assert main(args) == 1
+        finally:  # main() set the 'resxr' logger's level and handler
+            resxr_logger.setLevel(level)
+            resxr_logger.handlers[:] = handlers
+        assert "Pipeline failed: 'NoneType' object is not iterable" in caplog.text
+        assert "Configuration error" not in caplog.text
+        assert ("Traceback (most recent call last)" in capsys.readouterr().err) == verbose
 
 
 # ---------------------------------------------------------------------------
