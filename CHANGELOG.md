@@ -11,6 +11,10 @@ _Nothing yet._
 
 ## [0.2.2] - 2026-10-04
 
+### ⚠ Breaking Changes
+
+- **Removed `CheckRegistry.failed_checks` and `CheckRegistry.clear_failed_checks()`** (on the global `check_registry`) from the Python API. A check that raises is recorded per session instead: in `Session.checks_not_run` and in that session's `checks_not_run` in the `RunResult`, with the reason `failed: <error>`, and in the HTML report under "Checks not run".
+
 ### Fixed
 
 - The shipped configuration loads: an empty `validation.settings` block is read as `{}`.
