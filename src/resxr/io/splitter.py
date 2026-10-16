@@ -103,6 +103,17 @@ def _log_not_enabled_in_metadata(
         )
 
 
+def _metadata_reason(session: Session, system: TrackingSystem) -> str:
+    """What the metadata says about a system whose stream is absent."""
+    key = _ENABLED_KEYS[system]
+    problem = session.metadata.flag_problems.get(key)
+    if problem:
+        return f"metadata: {problem}"
+    if getattr(session.metadata, key):
+        return f"metadata: {key} is true"
+    return f"metadata: {key} is text, read as false"
+
+
 def _report_unrouted_columns(
     sid: str, all_columns: list[str], alternate_time_columns: dict[str, str] | None
 ) -> None:
@@ -227,6 +238,13 @@ def split_continuous_data(
                 )
             else:
                 logger.debug(f"Skipping {system.value} (not enabled during recording)")
+            if _ENABLED_KEYS[system] not in session.metadata.false_flags:
+                data = (
+                    f"its {n_data} columns were not exported"
+                    if n_data
+                    else f"no {system.value} columns in the continuous data"
+                )
+                session.streams_absent[system] = f"{_metadata_reason(session, system)}; {data}"
             continue
 
         # Skip if only timestamp column
@@ -236,10 +254,15 @@ def split_continuous_data(
                     f"Session '{sid}': no Head columns found in the continuous data; "
                     "Head not exported"
                 )
+                session.streams_absent[system] = "no Head columns in the continuous data"
             else:
                 logger.warning(
                     f"Session '{sid}': {system.value} enabled in metadata but no "
                     f"{system.value} columns found; {system.value} not exported"
+                )
+                session.streams_absent[system] = (
+                    f"{_metadata_reason(session, system)}; no {system.value} columns in the "
+                    "continuous data"
                 )
             continue
 
@@ -297,14 +320,23 @@ def split_continuous_data(
             _log_not_enabled_in_metadata(
                 session, TrackingSystem.FACE, "the face file stays only in sourcedata/"
             )
+        if "face_enabled" not in session.metadata.false_flags:
+            data = "the face file was not exported" if face is not None else "no face file"
+            session.streams_absent[TrackingSystem.FACE] = (
+                f"{_metadata_reason(session, TrackingSystem.FACE)}; {data}"
+            )
     elif face is None:
         logger.warning(
             f"Session '{sid}': Face not exported: face_enabled is true but no face file was "
             "loaded (none matches input.face_data_pattern, or it could not be read); the "
             "eyes_closed check needs the Face stream and will not run"
         )
+        session.streams_absent[TrackingSystem.FACE] = (
+            "metadata: face_enabled is true; no face file was loaded"
+        )
     elif face.empty:
         logger.warning(f"Session '{sid}': Face not exported: the face file has no data rows")
+        session.streams_absent[TrackingSystem.FACE] = "the face file has no data rows"
     else:
         face_df = face.copy()
         clock = (alternate_time_columns or {}).get("Face")

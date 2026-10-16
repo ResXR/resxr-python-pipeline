@@ -32,7 +32,7 @@ bids:
 # Sampling Frequencies (Hz)
 # -------------------------
 # Expected sampling rate for each tracking system
-sampling_frequencies:  # values must be floats (use 90.0, not 90)
+sampling_frequencies:  # expected sampling rate per tracking system, in Hz
   Head: 72.0
   Hands: 90.0
   Eyes: 30.0
@@ -145,8 +145,9 @@ validation:
     - eyes_closed
     - clock_dropout
 
-  # Optional per-check settings. All keys here are passed through to checks
-  # via ValidationConfig.get(). Add or uncomment as needed.
+  # Optional per-check settings. Each key must be declared by a registered
+  # check (in its settings_keys); an unknown key is a configuration error.
+  # Add or uncomment as needed.
   settings:
 
     # eyes_closed check thresholds (defaults used if omitted)
@@ -185,7 +186,10 @@ preprocessing:
   # If no alternate is configured for a system, "timestamp" IS the global
   # clock and only "latency" appears in the output (no "latency_global").
   #
-  # Leave empty {} to use global timestamp for all systems.
+  # Leave empty {} only for data without per-system clock columns: every
+  # stream is then timed by timeSinceStartup alone, and the sampling-rate,
+  # clock-dropout, hand-tracking-loss and eye-closure checks log an error for
+  # each stream they check and raise no flags.
   alternate_time_columns:
     Head: "Node_Head_Time"
     Hands: "Node_HandLeft_Time"

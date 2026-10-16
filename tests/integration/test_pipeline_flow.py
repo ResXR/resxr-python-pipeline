@@ -1188,29 +1188,91 @@ def test_a_stream_turned_off_on_purpose_is_not_a_check_not_run(
 
 
 @pytest.mark.parametrize(
-    "edit_metadata",
+    ("edit_metadata", "why"),
     [
-        pytest.param(lambda m: m.update(face_enabled=True), id="face_enabled_true_no_face_file"),
-        pytest.param(lambda m: m.pop("face_enabled"), id="face_enabled_missing"),
-        pytest.param(lambda m: m.update(face_enabled=0), id="face_enabled_0"),
-        pytest.param(lambda m: m.update(face_enabled="false"), id="face_enabled_string_false"),
-        pytest.param(lambda m: m.update(face_enabled=None), id="face_enabled_null"),
+        pytest.param(
+            lambda m: m.update(face_enabled=True),
+            "metadata: face_enabled is true; no face file was loaded",
+            id="face_enabled_true_no_face_file",
+        ),
+        pytest.param(
+            lambda m: m.pop("face_enabled"),
+            "metadata: face_enabled missing; no face file",
+            id="face_enabled_missing",
+        ),
+        pytest.param(
+            lambda m: m.update(face_enabled=0),
+            "metadata: face_enabled is 0, not true or false; no face file",
+            id="face_enabled_0",
+        ),
+        pytest.param(
+            lambda m: m.update(face_enabled="false"),
+            "metadata: face_enabled is text, read as false; no face file",
+            id="face_enabled_string_false",
+        ),
+        pytest.param(
+            lambda m: m.update(face_enabled=None),
+            "metadata: face_enabled is null, not true or false; no face file",
+            id="face_enabled_null",
+        ),
     ],
 )
 def test_an_expected_stream_that_is_absent_is_a_check_not_run(
-    tmp_path, minimal_config_dict, caplog, edit_metadata
+    tmp_path, minimal_config_dict, caplog, edit_metadata, why
 ):
     outcome, summary, report = _run_with_every_stream_check(
         tmp_path, minimal_config_dict, caplog, edit_metadata=edit_metadata
     )
+    reason = f"the session has no Face stream ({why})"
     assert [(c.check, c.stream, c.reason) for c in outcome.checks_not_run] == [
-        ("eyes_closed", "Face", "the session has no Face stream")
+        ("eyes_closed", "Face", reason)
     ]
     assert [r.levelname for r in summary] == ["WARNING"]
-    assert "Session 'A': check 'eyes_closed' not run: the session has no Face stream" in (
-        caplog.text
-    )
+    assert f"Session 'A': check 'eyes_closed' not run: {reason}" in caplog.text
     assert "<h2>Checks not run (1)</h2>" in report
+
+
+@pytest.mark.parametrize(
+    ("edit", "why"),
+    [
+        pytest.param(
+            lambda df: df.drop(
+                columns=[c for c in df.columns if c.startswith(("Left", "Right", "Node_Hand"))]
+            ),
+            "metadata: hands_enabled is true; no Hands columns in the continuous data",
+            id="enabled_without_columns",
+        ),
+        pytest.param(
+            lambda df: df.drop(columns="Node_HandLeft_Time"),
+            "metadata: hands_enabled missing; its 4 columns were not exported",
+            id="key_missing_with_columns",
+        ),
+    ],
+)
+def test_the_not_run_reason_says_why_the_stream_is_absent(
+    tmp_path, minimal_config_dict, caplog, edit, why
+):
+    data_dir = tmp_path / "sessions"
+    session_dir = _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
+    _edit_continuous(session_dir, edit)
+    if why.startswith("metadata: hands_enabled missing"):
+        metadata_path = session_dir / "session_metadata.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata.pop("hands_enabled")
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    minimal_config_dict["validation"]["enabled_checks"] = ["hands_tracking_loss"]
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {"Head": "Node_Head_Time"}
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=[{"source_dir": "sess_a", "subject_id": "01", "session_label": "01"}],
+    )
+    (outcome,) = run(str(cfg)).sessions
+    assert [c.reason for c in outcome.checks_not_run] == [
+        f"the session has no Hands stream ({why})"
+    ]
 
 
 @pytest.mark.parametrize("session_id", [None, ""], ids=["null", "empty"])

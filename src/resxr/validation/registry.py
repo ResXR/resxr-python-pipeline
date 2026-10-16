@@ -129,20 +129,27 @@ class CheckRegistry:
                 if required_streams:
                     # Multi-stream check: verify all required streams exist
                     missing = [s for s in required_streams if not session.has_stream(s)]
-                    if missing:
+                    expected = [s for s in missing if s not in session.systems_off]
+                    if missing and not expected:
+                        # Off on purpose (config or metadata): not a check not run
                         names = ", ".join(s.value for s in missing)
-                        if all(s in session.systems_off for s in missing):
-                            # Off on purpose (config or metadata): not a check not run
-                            logger.debug(
-                                f"Session '{session.session_id}': check '{check.name}' "
-                                f"skipped: {names} turned off in the config or the metadata"
-                            )
-                        elif session.record_check_not_run(
-                            check.name, names, f"the session has no {names} stream"
-                        ):
+                        logger.debug(
+                            f"Session '{session.session_id}': check '{check.name}' "
+                            f"skipped: {names} turned off in the config or the metadata"
+                        )
+                        continue
+                    if expected:
+                        names = ", ".join(s.value for s in expected)
+                        why = "; ".join(
+                            session.streams_absent[s]
+                            for s in expected
+                            if s in session.streams_absent
+                        )
+                        reason = f"the session has no {names} stream" + (f" ({why})" if why else "")
+                        if session.record_check_not_run(check.name, names, reason):
                             logger.info(
                                 f"Session '{session.session_id}': check '{check.name}' "
-                                f"not run: the session has no {names} stream"
+                                f"not run: {reason}"
                             )
                         continue
 

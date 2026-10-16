@@ -32,7 +32,7 @@ Examples:
 Exit status: 0 when every session was processed; 1 when a session was
 skipped, no session was found, or the configuration is invalid.
 
-For more information, see: https://github.com/ResXR/ResXR
+For more information, see: https://github.com/ResXR/resxr-python-pipeline
         """,
     )
 
@@ -60,7 +60,7 @@ For more information, see: https://github.com/ResXR/ResXR
         "-q",
         "--quiet",
         action="store_true",
-        help="Suppress all output except errors.",
+        help="Show errors only; warnings and the run summary are hidden.",
     )
 
     parser.add_argument(

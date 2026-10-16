@@ -580,3 +580,34 @@ class TestColumnGroupNamesAreChecked:
 
     def test_defined_group_names_are_accepted(self, minimal_config_dict):
         validate_config(self._config(minimal_config_dict, {"stats_summary": ["gaze"]}))
+
+
+class TestHelpAndShippedComments:
+    """The CLI help and the shipped configuration's comments say what the code does."""
+
+    def test_help_names_the_repository_and_what_quiet_hides(self):
+        text = build_parser().format_help()
+        assert "https://github.com/ResXR/resxr-python-pipeline" in text
+        assert "https://github.com/ResXR/ResXR\n" not in text
+        assert "Show errors only; warnings and the run summary are hidden." in " ".join(
+            text.split()
+        )
+
+    def test_the_shipped_config_comments_match_the_code(self):
+        path = Path(__file__).resolve().parents[1] / "config" / "pipeline_config.yaml"
+        text = " ".join(
+            line.strip().lstrip("#").strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if "#" in line
+        )
+        assert "values must be floats" not in text  # an int rate is accepted
+        assert "expected sampling rate per tracking system, in Hz" in text
+        assert "All keys here are passed through to checks" not in text
+        assert "Each key must be declared by a registered check (in its settings_keys)" in text
+        assert (
+            "the sampling-rate, clock-dropout, hand-tracking-loss and eye-closure checks log an "
+            "error for each stream they check and raise no flags"
+        ) in " ".join(text.split())
+        assert "session files (motion, channels, events, scans), participants.tsv/.json and " in (
+            text
+        )

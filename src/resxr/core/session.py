@@ -446,6 +446,10 @@ class Session:
     # metadata); a check that needs one of them is not listed in checks_not_run.
     systems_off: set[TrackingSystem] = field(default_factory=set)
 
+    # Why an expected stream was not created (set by the splitter); named in the
+    # reason of a check that needs the stream
+    streams_absent: dict[TrackingSystem, str] = field(default_factory=dict)
+
     def record_check_not_run(self, check: str, stream: str, reason: str) -> bool:
         """Record that *check* produced no result for *stream*; False if already recorded."""
         entry = CheckNotRun(check=check, stream=stream, reason=reason)

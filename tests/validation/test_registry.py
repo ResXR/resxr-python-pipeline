@@ -273,6 +273,36 @@ class TestRunAll:
             ("multi_stream", "Hands", "the session has no Hands stream")
         ]
 
+    def test_the_reason_names_only_the_expected_streams_and_why_they_are_absent(
+        self, head_stream, minimal_session, caplog
+    ):
+        """A stream off on purpose is left out of the reason; the splitter's note is shown."""
+
+        class _TwoStreamCheck:
+            name = "two_streams"
+            description = "Needs Hands and Face"
+            required_streams = [TrackingSystem.HANDS, TrackingSystem.FACE]
+
+            def __call__(self, stream, session, config):
+                return []
+
+        minimal_session.systems_off = {TrackingSystem.FACE}
+        minimal_session.streams_absent = {
+            TrackingSystem.HANDS: "metadata: hands_enabled missing; no Hands columns in the "
+            "continuous data"
+        }
+        registry = CheckRegistry()
+        registry.register(_TwoStreamCheck())
+        registry.run_all(head_stream, minimal_session, _make_validation_config(["two_streams"]))
+        assert [(c.check, c.stream, c.reason) for c in minimal_session.checks_not_run] == [
+            (
+                "two_streams",
+                "Hands",
+                "the session has no Hands stream (metadata: hands_enabled missing; no Hands "
+                "columns in the continuous data)",
+            )
+        ]
+
 
 # ===========================================================================
 # ValidationCheck protocol
