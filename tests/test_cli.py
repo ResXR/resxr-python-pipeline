@@ -43,8 +43,23 @@ def _write(tmp_path: Path, config: dict) -> Path:
     return path
 
 
-def _mapping(source_dir: str, subject_id: str, session_label: str = "01") -> dict:
-    return {"source_dir": source_dir, "subject_id": subject_id, "session_label": session_label}
+def _mapping(source_dir: str, subject_id: str, session_label: str = "01", **demographics) -> dict:
+    """A session mapping; *demographics* are its age, sex and handedness, if given."""
+    return {
+        "source_dir": source_dir,
+        "subject_id": subject_id,
+        "session_label": session_label,
+        **demographics,
+    }
+
+
+def _different_values(subject: str, field: str, values: str) -> str:
+    """The configuration error for a subject whose mappings give different *field* values."""
+    return (
+        f"session_mappings gives sub-{subject} different {field} values: {values}; "
+        f"participants.tsv has one row per subject, so every mapping of sub-{subject} must give "
+        f"the same {field}, or none may give it"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +325,15 @@ class TestMainConfigErrors:
                 "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes "
                 "are added): output.task_name 'VR tracking'",
             ),
+            (
+                lambda cfg: cfg.update(
+                    session_mappings=[
+                        _mapping("a", "01", age="25"),
+                        _mapping("b", "01", "02", age="26"),
+                    ]
+                ),
+                _different_values("01", "age", "'25' (a), '26' (b)"),
+            ),
         ],
     )
     def test_config_error_exits_1_before_processing(
@@ -500,6 +524,69 @@ class TestSessionMappingsAndLabels:
             _mapping("c", "P001", "pre"),
         ]
         validate_config(PipelineConfig.model_validate(minimal_config_dict))
+
+
+class TestSubjectDemographicsMustAgree:
+    """participants.tsv has one row per subject, so the mappings of a subject must agree."""
+
+    @staticmethod
+    def _validate(minimal_config_dict, mappings) -> None:
+        minimal_config_dict["session_mappings"] = mappings
+        validate_config(PipelineConfig.model_validate(minimal_config_dict))
+
+    def _error(self, minimal_config_dict, mappings) -> str:
+        with pytest.raises(ConfigurationError) as excinfo:
+            self._validate(minimal_config_dict, mappings)
+        return str(excinfo.value)
+
+    def test_different_values_are_named_with_their_folders(self, minimal_config_dict):
+        mappings = [
+            _mapping("a", "01", "01", age="25"),
+            _mapping("b", "01", "02", age="26"),
+            _mapping("c", "01", "03", age="25"),
+        ]
+        assert self._error(minimal_config_dict, mappings) == _different_values(
+            "01", "age", "'25' (a, c), '26' (b)"
+        )
+
+    def test_a_value_left_out_of_one_mapping_is_an_error(self, minimal_config_dict):
+        mappings = [_mapping("a", "01", "01", sex="F"), _mapping("b", "01", "02")]
+        assert self._error(minimal_config_dict, mappings) == _different_values(
+            "01", "sex", "'F' (a), not given (b)"
+        )
+
+    def test_each_differing_field_of_each_subject_is_named(self, minimal_config_dict):
+        mappings = [
+            _mapping("a", "01", "01", sex="F", handedness="R"),
+            _mapping("b", "02", "01", age="30"),
+            _mapping("c", "01", "02", sex="M", handedness="L"),
+            _mapping("d", "02", "02", age="31", handedness="n/a"),
+        ]
+        assert self._error(minimal_config_dict, mappings) == "; ".join(
+            [
+                _different_values("01", "sex", "'F' (a), 'M' (c)"),
+                _different_values("01", "handedness", "'R' (a), 'L' (c)"),
+                _different_values("02", "age", "'30' (b), '31' (d)"),
+            ]
+        )
+
+    @pytest.mark.parametrize(
+        "mappings",
+        [
+            [
+                _mapping("a", "01", "01", age="25", sex="F", handedness="R"),
+                _mapping("b", "01", "02", age="25", sex="F", handedness="R"),
+            ],
+            [_mapping("a", "01", "01", age="n/a"), _mapping("b", "01", "02")],
+            [_mapping("a", "01", "01", age="25"), _mapping("b", "02", "01", age="30")],
+            [_mapping("a", "01", "01"), _mapping("b", "01", "02")],
+        ],
+        ids=["same_values", "na_and_left_out", "different_subjects", "none_given"],
+    )
+    def test_mappings_that_give_one_row_per_subject_are_accepted(
+        self, minimal_config_dict, mappings
+    ):
+        self._validate(minimal_config_dict, mappings)
 
 
 class TestEnabledSystemsNeedARate:

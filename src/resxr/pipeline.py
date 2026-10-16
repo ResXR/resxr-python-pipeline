@@ -61,6 +61,18 @@ logger = get_logger(__name__)
 # A BIDS label (sub-<label>, ses-<label>, task-<label>): letters and digits only
 _BIDS_LABEL = re.compile(r"[A-Za-z0-9]+")
 
+# participants.tsv columns after participant_id, each read from the session mapping
+_PARTICIPANT_FIELDS = ("age", "sex", "handedness")
+
+
+def _participant_row(mapping: SessionMapping) -> dict[str, str]:
+    """The subject's participants.tsv row, from one of its mappings ("n/a" where not given)."""
+    row = {"participant_id": f"sub-{mapping.subject_id}"}
+    for name in _PARTICIPANT_FIELDS:
+        value = getattr(mapping, name)
+        row[name] = "n/a" if value is None else value
+    return row
+
 
 def validate_config(config: PipelineConfig) -> None:
     """Reject settings that would otherwise be ignored or produce a wrong dataset.
@@ -71,8 +83,11 @@ def validate_config(config: PipelineConfig) -> None:
     ``validation.settings`` keys that no registered check declares, column-group
     names in ``validation.settings.check_column_groups`` that are not defined, with
     masking on, ``masking_checks`` names that are not enabled checks, subject,
-    session and task labels that are not BIDS labels, and session mappings that
-    share a subject/session pair or a folder.
+    session and task labels that are not BIDS labels, session mappings that
+    share a subject/session pair or a folder, and mappings of one subject that
+    give different age, sex or handedness values (participants.tsv has one row
+    per subject; a value given in one mapping and left out in another counts as
+    different).
     """
     problems = []
     known_checks = check_registry.available_checks
@@ -161,11 +176,13 @@ def validate_config(config: PipelineConfig) -> None:
 
     by_target: dict[tuple[str, str], list[str]] = {}
     by_folder: dict[Path, list[str]] = {}
+    by_subject: dict[str, list[SessionMapping]] = {}
     for mapping in config.session_mappings:
         target = (mapping.subject_id, mapping.session_label)
         by_target.setdefault(target, []).append(mapping.source_dir)
         folder = _source_dir(mapping, config).resolve()
         by_folder.setdefault(folder, []).append(f"sub-{target[0]} ses-{target[1]}")
+        by_subject.setdefault(mapping.subject_id, []).append(mapping)
     for (subject, session), folders in by_target.items():
         if len(folders) > 1:
             problems.append(
@@ -177,6 +194,23 @@ def validate_config(config: PipelineConfig) -> None:
             problems.append(
                 f"session_mappings maps the folder {folder} {len(targets)} times "
                 f"({', '.join(targets)}); map each folder once"
+            )
+    for subject, subject_mappings in by_subject.items():
+        rows = [_participant_row(mapping) for mapping in subject_mappings]
+        for name in _PARTICIPANT_FIELDS:
+            if len({row[name] for row in rows}) == 1:
+                continue  # the same participants.tsv value from every mapping
+            given: dict[str | None, list[str]] = {}
+            for mapping in subject_mappings:
+                given.setdefault(getattr(mapping, name), []).append(mapping.source_dir)
+            values = ", ".join(
+                f"{'not given' if value is None else repr(value)} ({', '.join(folders)})"
+                for value, folders in given.items()
+            )
+            problems.append(
+                f"session_mappings gives sub-{subject} different {name} values: {values}; "
+                f"participants.tsv has one row per subject, so every mapping of sub-{subject} "
+                f"must give the same {name}, or none may give it"
             )
 
     if config.preprocessing.apply_quality_masking and config.preprocessing.masking_checks:
@@ -486,7 +520,9 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
             _log_no_sessions_found(config)
 
     result = RunResult()
-    processed_subjects = []
+    # participants.tsv: one row per subject, from its first processed session (validate_config
+    # makes every mapping of a subject give the same row)
+    participants: dict[str, dict[str, str]] = {}
     resxr_logger = logging.getLogger("resxr")
     source_dirs = [_source_dir(mapping, config) for mapping in mappings]
     written: dict[Path, str] = {}  # output target -> the session that wrote it in this run
@@ -507,14 +543,8 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
             )
             outcome.processed = True
             outcome.checks_not_run = list(session.checks_not_run)
-            processed_subjects.append(
-                {
-                    "participant_id": f"sub-{session.subject_id}",
-                    "age": mapping.age if mapping.age is not None else "n/a",
-                    "sex": mapping.sex if mapping.sex is not None else "n/a",
-                    "handedness": mapping.handedness if mapping.handedness is not None else "n/a",
-                }
-            )
+            row = _participant_row(mapping)
+            participants.setdefault(row["participant_id"], row)
         except ResXRError as e:
             outcome.reason = str(e)
         except Exception as e:  # not foreseen by the code: skip this session only
@@ -534,8 +564,8 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
         result.sessions.append(outcome)
 
     # Write dataset-level files only if at least one session succeeded
-    if processed_subjects:
-        write_dataset_files(config, bids, processed_subjects)
+    if participants:
+        write_dataset_files(config, bids, list(participants.values()))
 
     log_run_summary(result)
     if result.processed:
@@ -865,7 +895,8 @@ def write_dataset_files(config: PipelineConfig, bids: BIDSLayout, subjects: list
     bids : BIDSLayout
         BIDS layout manager
     subjects : List[dict]
-        List of subject info dictionaries
+        The participants.tsv rows, one per subject (``participant_id``, ``age``,
+        ``sex``, ``handedness``)
     """
     # Create root directory
     bids.bids_root.mkdir(parents=True, exist_ok=True)

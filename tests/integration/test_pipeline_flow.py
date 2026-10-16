@@ -1932,3 +1932,91 @@ def test_a_text_fixed_delta_time_no_longer_stops_the_report(tmp_path, minimal_co
     assert run(str(cfg)).exit_code == 0
     report = (tmp_path / "bids_out" / "sub-01" / "ses-01" / "A_report.html").read_text("utf-8")
     assert "<tr><th>Fixed delta time</th><td>0.0200 s</td></tr>" in report
+
+
+# ── participants.tsv: one row per subject (D13) ──────────────────────
+
+
+def _subject_sessions_config(tmp_path, minimal_config_dict, mappings: list[dict]) -> Path:
+    """One clocked session folder per mapping (sess_a has session_id A, ...), and the config."""
+    data_dir = tmp_path / "sessions"
+    for mapping in mappings:
+        name = mapping["source_dir"]
+        _write_clocked_session_dir(data_dir, name, session_id=name.removeprefix("sess_").upper())
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    return _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=tmp_path / "bids_out",
+        session_mappings=mappings,
+    )
+
+
+def test_a_subject_with_two_processed_sessions_has_one_participants_row(
+    tmp_path, minimal_config_dict
+):
+    demographics = {"age": "25", "sex": "F", "handedness": "R"}
+    cfg = _subject_sessions_config(
+        tmp_path,
+        minimal_config_dict,
+        [
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01", **demographics},
+            {"source_dir": "sess_b", "subject_id": "02", "session_label": "01"},
+            {"source_dir": "sess_c", "subject_id": "01", "session_label": "02", **demographics},
+        ],
+    )
+    result = run(str(cfg))
+    assert result.exit_code == 0
+    assert len(result.processed) == 3
+    bids_root = tmp_path / "bids_out"
+    assert (bids_root / "participants.tsv").read_text(encoding="utf-8") == (
+        "participant_id\tage\tsex\thandedness\nsub-01\t25\tF\tR\nsub-02\tn/a\tn/a\tn/a\n"
+    )
+    for session in ("ses-01", "ses-02"):  # both sessions of sub-01 are exported
+        assert list((bids_root / "sub-01" / session / "motion").glob("*_motion.tsv"))
+
+
+def test_a_subject_whose_first_session_is_skipped_is_listed_once(tmp_path, minimal_config_dict):
+    cfg = _subject_sessions_config(
+        tmp_path,
+        minimal_config_dict,
+        [
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01", "sex": "F"},
+            {"source_dir": "sess_b", "subject_id": "01", "session_label": "02", "sex": "F"},
+        ],
+    )
+    _zero_hands_clock(tmp_path / "sessions" / "sess_a")  # skipped at the split
+    result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert (tmp_path / "bids_out" / "participants.tsv").read_text(encoding="utf-8") == (
+        "participant_id\tage\tsex\thandedness\nsub-01\tn/a\tF\tn/a\n"
+    )
+
+
+def test_different_demographics_for_one_subject_stop_the_run_before_any_session(
+    tmp_path, minimal_config_dict, caplog
+):
+    cfg = _subject_sessions_config(
+        tmp_path,
+        minimal_config_dict,
+        [
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01", "age": "25"},
+            {"source_dir": "sess_b", "subject_id": "01", "session_label": "02", "age": "26"},
+        ],
+    )
+    message = (
+        f"Configuration error in {cfg}: session_mappings gives sub-01 different age values: "
+        "'25' (sess_a), '26' (sess_b); participants.tsv has one row per subject, so every "
+        "mapping of sub-01 must give the same age, or none may give it"
+    )
+    for dry_run in ([], ["--dry-run"]):
+        caplog.clear()
+        assert main(["-c", str(cfg), *dry_run]) == 1
+        assert [r.getMessage() for r in caplog.records if r.levelname == "ERROR"] == [message]
+        assert "Processing session" not in caplog.text
+        assert "Configuration valid" not in caplog.text
+    assert not (tmp_path / "bids_out").exists()
