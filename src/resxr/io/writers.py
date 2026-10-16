@@ -221,12 +221,17 @@ def _clear_read_only(path: Path) -> None:
     os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
 
 
-def _retry_read_only(func, path, error) -> None:
-    """rmtree error handler: clear a read-only file or folder and delete it again."""
+def _retry_read_only(func, path, exc: BaseException) -> None:
+    """rmtree onexc handler: clear a read-only file or folder and delete it again."""
     if func not in (os.unlink, os.remove, os.rmdir):
-        raise error if isinstance(error, BaseException) else error[1]
+        raise exc
     _clear_read_only(Path(path))
     func(path)
+
+
+def _retry_read_only_legacy(func, path, exc_info) -> None:
+    """rmtree onerror handler (Python < 3.12): the same, from an exc_info tuple."""
+    _retry_read_only(func, path, exc_info[1])
 
 
 def remove_path(path: Path) -> None:
@@ -239,7 +244,7 @@ def remove_path(path: Path) -> None:
         if sys.version_info >= (3, 12):
             shutil.rmtree(path, onexc=_retry_read_only)
         else:
-            shutil.rmtree(path, onerror=_retry_read_only)
+            shutil.rmtree(path, onerror=_retry_read_only_legacy)
         return
     try:
         path.unlink()
