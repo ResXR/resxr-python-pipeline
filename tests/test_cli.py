@@ -10,7 +10,7 @@ import yaml
 from resxr.cli import build_parser, main
 from resxr.core.config import PipelineConfig
 from resxr.core.exceptions import ConfigurationError
-from resxr.pipeline import validate_config
+from resxr.pipeline import load_config, validate_config
 
 _MASKING_NOT_ENABLED = (
     "preprocessing.masking_checks names check(s) {names} that are not in "
@@ -106,6 +106,7 @@ class TestMainDryRun:
 
     @pytest.fixture()
     def valid_config_yaml(self, tmp_path, minimal_config_dict) -> Path:
+        minimal_config_dict["input"]["data_dir"] = str(tmp_path)
         path = tmp_path / "config.yaml"
         with open(path, "w") as f:
             yaml.dump(minimal_config_dict, f)
@@ -145,7 +146,7 @@ class TestMainDryRun:
         path = tmp_path / "config.yaml"
         path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
         assert main(["--config", str(path), "--dry-run"]) == 1
-        assert "Configuration error: " in caplog.text
+        assert f"Configuration error in {path}: " in caplog.text
         assert _MASKING_NOT_ENABLED.format(names="['eyes_closed']") in caplog.text
 
     def test_dry_run_rejects_an_unknown_nested_key(self, tmp_path, minimal_config_dict, caplog):
@@ -153,7 +154,7 @@ class TestMainDryRun:
         path = tmp_path / "config.yaml"
         path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
         assert main(["--config", str(path), "--dry-run"]) == 1
-        assert "Configuration error: " in caplog.text
+        assert f"Configuration error in {path}: " in caplog.text
         assert "preprocessing.apply_quality_maskin\n  Extra inputs are not permitted" in (
             caplog.text
         )
@@ -163,7 +164,7 @@ class TestMainDryRun:
         path = tmp_path / "config.yaml"
         path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
         assert main(["--config", str(path), "--dry-run"]) == 1
-        assert "Configuration error: " in caplog.text
+        assert f"Configuration error in {path}: " in caplog.text
         assert (
             _UNKNOWN_SETTINGS.format(
                 keys="['sampling_rate_tolerence']", known=_SHIPPED_SETTINGS_KEYS
@@ -191,9 +192,38 @@ class TestMainDryRun:
         path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert (
-            "Configuration error: system_descriptions names unknown tracking system(s) "
-            "['Hand']; valid names: ['Head', 'Hands', 'Eyes', 'Face', 'Body', 'Controllers']"
+            f"Configuration error in {path}: system_descriptions names unknown tracking "
+            "system(s) ['Hand']; valid names: ['Head', 'Hands', 'Eyes', 'Face', 'Body', "
+            "'Controllers']"
         ) in caplog.text
+
+    def test_dry_run_rejects_a_data_dir_that_does_not_exist(
+        self, tmp_path, minimal_config_dict, caplog
+    ):
+        minimal_config_dict["input"]["data_dir"] = str(tmp_path / "no_such_folder")
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert (
+            f"Configuration error in {path}: input.data_dir does not exist: "
+            f"{tmp_path / 'no_such_folder'}"
+        ) in caplog.text
+        assert "Configuration valid" not in caplog.text
+
+    def test_a_relative_data_dir_is_named_with_the_folder_it_is_read_from(
+        self, tmp_path, minimal_config_dict, caplog, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "a_file").write_text("x")
+        for data_dir, state in (("missing", "does not exist"), ("a_file", "is not a folder")):
+            minimal_config_dict["input"]["data_dir"] = data_dir
+            path = tmp_path / "config.yaml"
+            path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+            assert main(["--config", str(path), "--dry-run"]) == 1
+            assert (
+                f"input.data_dir {state}: {data_dir} ({tmp_path / data_dir}; a relative path "
+                "is read from the current folder)"
+            ) in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -371,9 +401,10 @@ class TestSettingsKeysMustBeDeclared:
     def test_every_key_the_shipped_code_reads_is_accepted(self, minimal_config_dict):
         validate_config(self._config(minimal_config_dict, dict.fromkeys(_SHIPPED_SETTINGS_KEYS)))
 
-    def test_the_shipped_config_passes_validate_config(self):
-        path = Path(__file__).resolve().parents[1] / "config" / "pipeline_config.yaml"
-        validate_config(PipelineConfig.from_yaml(path))
+    def test_the_shipped_config_passes_validate_config(self, monkeypatch):
+        root = Path(__file__).resolve().parents[1]
+        monkeypatch.chdir(root)  # input.data_dir (DATA) is read from the repository root
+        load_config(root / "config" / "pipeline_config.yaml")
 
     @pytest.mark.parametrize("declared", [("my_check_threshold",), "my_check_threshold"])
     def test_a_custom_check_declares_its_own_key(self, minimal_config_dict, monkeypatch, declared):
@@ -471,3 +502,25 @@ class TestEnabledSystemsNeedARate:
         del minimal_config_dict["sampling_frequencies"]["Controllers"]
         minimal_config_dict["systems"] = {"Controllers": {"enabled": False}}
         validate_config(PipelineConfig.model_validate(minimal_config_dict))
+
+
+class TestDataDirMustExist:
+    """input.data_dir is checked at start-up, with mappings and with auto-discovery."""
+
+    @pytest.mark.parametrize("mappings", [[_mapping("sess_a", "01")], []])
+    def test_a_missing_data_dir_stops_the_run_before_any_session(
+        self, tmp_path, minimal_config_dict, caplog, mappings
+    ):
+        minimal_config_dict["input"]["data_dir"] = str(tmp_path / "no_such_folder")
+        minimal_config_dict["output"]["bids_root"] = str(tmp_path / "out")
+        minimal_config_dict["session_mappings"] = mappings
+        path = tmp_path / "config.yaml"
+        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        assert main(["--config", str(path)]) == 1
+        assert (
+            f"Configuration error in {path}: input.data_dir does not exist: "
+            f"{tmp_path / 'no_such_folder'}"
+        ) in caplog.text
+        assert "Pipeline failed" not in caplog.text
+        assert "Session directory not found" not in caplog.text
+        assert not (tmp_path / "out").exists()

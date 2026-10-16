@@ -120,10 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.dry_run:
         logger.info("Dry run mode - validating configuration...")
         try:
-            from .core.config import PipelineConfig
-
-            config = PipelineConfig.from_yaml(config_path)
-            pipeline.validate_config(config)
+            config = pipeline.load_config(config_path)
             logger.info(f"Configuration valid: {config_path}")
             logger.info(f"  Input directory: {config.input.data_dir}")
             logger.info(f"  Output directory: {config.output.bids_root}")
@@ -131,7 +128,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             logger.info(f"  Enabled systems: {[k for k, v in config.systems.items() if v.enabled]}")
             return 0
         except Exception as e:
-            logger.error(f"Configuration error: {e}")
+            logger.error(f"Configuration error in {config_path}: {e}")
             return 1
 
     # Run pipeline: exit 1 when a session was skipped or no session was found

@@ -173,6 +173,32 @@ def validate_config(config: PipelineConfig) -> None:
         raise ConfigurationError("; ".join(problems))
 
 
+def load_config(config_path: str | Path) -> PipelineConfig:
+    """Read the configuration file and check it (``validate_config``, then the data folder).
+
+    Used by :func:`run` and by the CLI's ``--dry-run``, so both report the
+    same configuration errors.
+
+    Raises
+    ------
+    ConfigurationError
+        If the file cannot be read or parsed, a setting is invalid, or
+        ``input.data_dir`` is not an existing folder.
+    """
+    config = PipelineConfig.from_yaml(Path(config_path))
+    validate_config(config)
+    data_dir = Path(config.input.data_dir)
+    if not data_dir.is_dir():
+        where = (
+            ""
+            if data_dir.is_absolute()
+            else (f" ({data_dir.resolve()}; a relative path is read from the current folder)")
+        )
+        state = "is not a folder" if data_dir.exists() else "does not exist"
+        raise ConfigurationError(f"input.data_dir {state}: {data_dir}{where}")
+    return config
+
+
 @dataclass
 class SessionOutcome:
     """What happened to one session of a run."""
@@ -405,11 +431,11 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
     Raises
     ------
     ConfigurationError
-        If the configuration is invalid (before any session is read).
+        If the configuration is invalid or ``input.data_dir`` is not an
+        existing folder (before any session is read).
     """
     # Load and check the configuration before any session is processed
-    config = PipelineConfig.from_yaml(Path(config_path))
-    validate_config(config)
+    config = load_config(config_path)
 
     # Setup logging
     logger.info(f"Starting ResXR pipeline with config: {config_path}")
