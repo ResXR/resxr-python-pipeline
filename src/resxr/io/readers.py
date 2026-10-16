@@ -48,20 +48,14 @@ def no_clock_column_message(csv_path: Path | str, alternative: str = "") -> str:
 def check_clock(values: pd.Series, source: Path, head_rate: float | None = None) -> None:
     """Warn about a timeSinceStartup column that departs from the input contract.
 
-    The column must be in seconds, never step backward and have a value in every
-    row. Leading and trailing zero rows are allowed (before onset and after
-    offset); a zero between valid values is counted, and so is an empty, NaN or
-    infinite cell anywhere. These rows are left out of the step checks below
-    (backward steps, milliseconds, gaps). Steps longer than 10 times the expected Head
-    interval (1 / *head_rate*, from ``sampling_frequencies``; without it, the
-    median step) are reported at INFO, since valid recordings can have them;
-    not when the column looks like milliseconds, since the gaps would then be
-    misread. Nothing is changed: the pipeline does not sort rows, convert units
-    or interpolate. A non-numeric column is left to the stream check, which
-    skips the session.
+    The column must be in seconds, step forward and hold a value in every row
+    except the leading and trailing zeros. Empty, NaN and infinite cells, zeros
+    between valid values and a single valid value are reported, and such rows
+    are left out of the step checks. A step over 10 expected Head intervals (10
+    median steps without a Head rate) is a gap, at INFO. Nothing is changed.
     """
     if not pd.api.types.is_numeric_dtype(values):
-        return
+        return  # left to the stream check, which skips the session
     t = values.to_numpy(dtype=float)
     missing = int((~np.isfinite(t)).sum())
     if missing:
