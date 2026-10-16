@@ -239,12 +239,12 @@ def split_continuous_data(
             else:
                 logger.debug(f"Skipping {system.value} (not enabled during recording)")
             if _ENABLED_KEYS[system] not in session.metadata.false_flags:
-                data = (
+                columns = (
                     f"its {n_data} columns were not exported"
                     if n_data
                     else f"no {system.value} columns in the continuous data"
                 )
-                session.streams_absent[system] = f"{_metadata_reason(session, system)}; {data}"
+                session.streams_absent[system] = f"{_metadata_reason(session, system)}; {columns}"
             continue
 
         # Skip if only timestamp column
@@ -321,9 +321,9 @@ def split_continuous_data(
                 session, TrackingSystem.FACE, "the face file stays only in sourcedata/"
             )
         if "face_enabled" not in session.metadata.false_flags:
-            data = "the face file was not exported" if face is not None else "no face file"
+            face_file = "the face file was not exported" if face is not None else "no face file"
             session.streams_absent[TrackingSystem.FACE] = (
-                f"{_metadata_reason(session, TrackingSystem.FACE)}; {data}"
+                f"{_metadata_reason(session, TrackingSystem.FACE)}; {face_file}"
             )
     elif face is None:
         logger.warning(
