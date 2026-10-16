@@ -185,7 +185,7 @@ class CheckRegistry:
         """The ``validation.settings`` keys the registered checks declare, sorted."""
         keys: set[str] = set()
         for check in self._checks.values():
-            declared = getattr(check, "settings_keys", ())
+            declared = getattr(check, "settings_keys", None) or ()
             keys.update([declared] if isinstance(declared, str) else declared)
         return sorted(keys)
 

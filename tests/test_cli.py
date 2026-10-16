@@ -7,10 +7,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from resxr import pipeline
 from resxr.cli import build_parser, main
 from resxr.core.config import PipelineConfig
 from resxr.core.exceptions import ConfigurationError
-from resxr.pipeline import load_config, validate_config
+from resxr.pipeline import validate_config
 
 _MASKING_NOT_ENABLED = (
     "preprocessing.masking_checks names check(s) {names} that are not in "
@@ -29,7 +30,8 @@ _SHIPPED_SETTINGS_KEYS = [
     "tracking_flags",
 ]
 _UNKNOWN_SETTINGS = (
-    "validation.settings has unknown key(s) {keys}; keys the registered checks read: {known}"
+    "validation.settings has unknown key(s) {keys}; keys the registered checks read: {known}; "
+    "a check that reads a settings key must list it in its settings_keys"
 )
 
 
@@ -404,7 +406,26 @@ class TestSettingsKeysMustBeDeclared:
     def test_the_shipped_config_passes_validate_config(self, monkeypatch):
         root = Path(__file__).resolve().parents[1]
         monkeypatch.chdir(root)  # input.data_dir (DATA) is read from the repository root
-        load_config(root / "config" / "pipeline_config.yaml")
+        pipeline.load_config(root / "config" / "pipeline_config.yaml")
+
+    @pytest.mark.parametrize("declared", [None, ()], ids=["None", "empty"])
+    def test_a_custom_check_without_settings_keys_declares_none(
+        self, minimal_config_dict, monkeypatch, declared
+    ):
+        from resxr.validation import check_registry
+
+        class _NoKeysCheck:
+            name = "_no_keys_check"
+            description = "Reads no settings"
+            required_streams = None
+            settings_keys = declared
+
+            def __call__(self, stream, session, config):
+                return []
+
+        monkeypatch.setitem(check_registry._checks, _NoKeysCheck.name, _NoKeysCheck())
+        validate_config(self._config(minimal_config_dict, {"eyes_closed_threshold": 0.8}))
+        assert check_registry.settings_keys == _SHIPPED_SETTINGS_KEYS[1:]  # checks' own keys
 
     @pytest.mark.parametrize("declared", [("my_check_threshold",), "my_check_threshold"])
     def test_a_custom_check_declares_its_own_key(self, minimal_config_dict, monkeypatch, declared):
@@ -524,3 +545,38 @@ class TestDataDirMustExist:
         assert "Pipeline failed" not in caplog.text
         assert "Session directory not found" not in caplog.text
         assert not (tmp_path / "out").exists()
+
+
+class TestColumnGroupNamesAreChecked:
+    """Names under validation.settings.check_column_groups must be defined column groups."""
+
+    @staticmethod
+    def _config(minimal_config_dict, selected) -> PipelineConfig:
+        minimal_config_dict["validation"]["column_groups"] = [
+            {"name": "head_position", "columns": ["Node_Head_px"]},
+            {"name": "gaze", "columns": ["LeftEye_qx"]},
+        ]
+        minimal_config_dict["validation"]["settings"] = {"check_column_groups": selected}
+        return PipelineConfig.model_validate(minimal_config_dict)
+
+    def test_an_undefined_group_name_is_an_error(self, minimal_config_dict):
+        config = self._config(
+            minimal_config_dict, {"stats_summary": ["head_position", "head_rotation"]}
+        )
+        with pytest.raises(ConfigurationError) as excinfo:
+            validate_config(config)
+        assert str(excinfo.value) == (
+            "validation.settings.check_column_groups names column group(s) ['head_rotation'] "
+            "that validation.column_groups does not define; defined groups: "
+            "['head_position', 'gaze']"
+        )
+
+    @pytest.mark.parametrize("selected", [["head_position"], {"stats_summary": "gaze"}])
+    def test_a_value_that_is_not_a_mapping_of_lists_is_an_error(
+        self, minimal_config_dict, selected
+    ):
+        with pytest.raises(ConfigurationError, match="must map check names to lists of"):
+            validate_config(self._config(minimal_config_dict, selected))
+
+    def test_defined_group_names_are_accepted(self, minimal_config_dict):
+        validate_config(self._config(minimal_config_dict, {"stats_summary": ["gaze"]}))

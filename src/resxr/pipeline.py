@@ -68,7 +68,8 @@ def validate_config(config: PipelineConfig) -> None:
     Raises ConfigurationError naming every problem found: unknown check names,
     unknown tracking-system names, sampling rates that are not positive or are
     missing for an enabled tracking system,
-    ``validation.settings`` keys that no registered check declares, with
+    ``validation.settings`` keys that no registered check declares, column-group
+    names in ``validation.settings.check_column_groups`` that are not defined, with
     masking on, ``masking_checks`` names that are not enabled checks, subject,
     session and task labels that are not BIDS labels, and session mappings that
     share a subject/session pair or a folder.
@@ -119,8 +120,31 @@ def validate_config(config: PipelineConfig) -> None:
     if unknown_settings:
         problems.append(
             f"validation.settings has unknown key(s) {unknown_settings}; keys the registered "
-            f"checks read: {known_settings}"
+            f"checks read: {known_settings}; a check that reads a settings key must list it in "
+            "its settings_keys"
         )
+
+    selected = config.validation.get("check_column_groups")
+    if selected is not None:
+        group_names = [group.name for group in config.validation.column_groups]
+        if not isinstance(selected, dict) or not all(
+            isinstance(names, list) and all(isinstance(n, str) for n in names)
+            for names in selected.values()
+        ):
+            problems.append(
+                "validation.settings.check_column_groups must map check names to lists of "
+                f"column-group names; got {selected!r}"
+            )
+        else:
+            unknown_groups = sorted(
+                {name for names in selected.values() for name in names} - set(group_names)
+            )
+            if unknown_groups:
+                problems.append(
+                    "validation.settings.check_column_groups names column group(s) "
+                    f"{unknown_groups} that validation.column_groups does not define; defined "
+                    f"groups: {group_names}"
+                )
 
     labels = [("output.task_name", config.output.task_name)]
     for mapping in config.session_mappings:
