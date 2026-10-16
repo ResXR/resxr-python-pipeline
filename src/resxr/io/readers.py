@@ -248,8 +248,8 @@ def load_face_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFra
         check_clock(df["timestamp"], csv_path, head_rate)
 
     if "Face_Status" in df.columns:
-        if df["Face_Status"].dtype == object:
-            df["Face_Status"] = df["Face_Status"].str.strip()
+        # Text is the object dtype on pandas 2 and the str dtype on pandas 3: test the values.
+        df["Face_Status"] = df["Face_Status"].map(lambda v: v.strip() if isinstance(v, str) else v)
         was_na = df["Face_Status"].isna()
         df["Face_Status"] = df["Face_Status"].map(
             {

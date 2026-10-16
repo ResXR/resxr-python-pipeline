@@ -97,6 +97,20 @@ class TestLoadFaceData:
         with pytest.raises(DataLoadError):
             load_face_data(tmp_path / "nonexistent.csv")
 
+    def test_face_status_values_with_spaces_are_read_on_every_pandas(self, tmp_path, caplog):
+        path = tmp_path / "x_FaceExpressionData.csv"
+        rows = [" true ", " True", "false ", " 0", "1 ", ""]
+        path.write_text(
+            "timeSinceStartup,Face_Status\n"
+            + "".join(f"{1 + i / 72:.4f},{v}\n" for i, v in enumerate(rows)),
+            encoding="utf-8",
+        )
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            df = load_face_data(path)
+        assert df["Face_Status"].tolist()[:5] == [True, True, False, False, True]
+        assert pd.isna(df["Face_Status"].iloc[5])  # blank stays missing
+        assert "unmapped" not in caplog.text
+
 
 # ===========================================================================
 # load_session_metadata
