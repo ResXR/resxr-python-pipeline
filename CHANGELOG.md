@@ -34,7 +34,7 @@ _Nothing yet._
 - `Face_Status` values with surrounding spaces (such as `" true "`) are read the same with pandas 3 as with pandas 2 (before, pandas 3 read them as `n/a`, with an "unmapped values" warning, so the Face `motion.tsv` differed between the two).
 - A metadata `session_id` with a character other than letters (A-Z, a-z), digits, `.`, `_` and `-` skips its session with an error that names the key and these characters (`session_id` names the report and the custom-tables folder; before, `"../../../evil"` wrote the report outside the BIDS root, and on Windows a drive letter such as `"M:evil"` sent it to that drive).
 - `participants.tsv` has one row per subject (before, one row per processed session: a subject with two sessions, such as `ses-01` and `ses-02`, was listed twice).
-- The derivative dataset's `dataset_description.json` (in `derivatives/resxr/`) gives the `License` set in `bids.license`, as the raw one does; `generate_derivative_description` takes the `bids_config` for it, as `generate_dataset_description` does (before, the derivative description had no `License`).
+- The derivative dataset's `dataset_description.json` (in `derivatives/resxr/`) gives the `License` set in `bids.license`, as the raw one does (`generate_derivative_description` accepts an optional `bids_config` for it; before, the derivative description had no `License`).
 
 ### Changed
 

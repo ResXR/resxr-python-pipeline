@@ -224,7 +224,7 @@ def generate_dataset_description(
 def generate_derivative_description(
     dataset_name: str,
     bids_version: str,
-    bids_config: BIDSConfig,
+    bids_config: BIDSConfig | None = None,
 ) -> dict[str, Any]:
     """
     Generate dataset_description.json for a BIDS derivative dataset.
@@ -235,26 +235,24 @@ def generate_derivative_description(
         Name of the dataset
     bids_version : str
         BIDS specification version
-    bids_config : BIDSConfig
-        BIDS specification configuration (from config); gives the License,
-        the same as the raw dataset's
+    bids_config : BIDSConfig | None
+        BIDS specification configuration (from config); when given, its
+        License is written, as in the raw description
 
     Returns
     -------
     Dict[str, Any]
         JSON-serializable metadata dictionary
     """
-    return {
+    desc: dict[str, Any] = {
         "Name": f"{dataset_name} (preprocessed)",
         "BIDSVersion": bids_version,
         "DatasetType": "derivative",
-        "License": bids_config.license,
-        "GeneratedBy": [
-            {
-                "Name": "ResXR",
-            }
-        ],
     }
+    if bids_config is not None:
+        desc["License"] = bids_config.license
+    desc["GeneratedBy"] = [{"Name": "ResXR"}]
+    return desc
 
 
 def generate_participants_json() -> dict[str, Any]:

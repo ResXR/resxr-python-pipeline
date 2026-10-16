@@ -324,23 +324,28 @@ class TestGenerateDatasetDescription:
 class TestGenerateDerivativeDescription:
     def test_returns_dict(self):
         """Returns a dict."""
-        result = generate_derivative_description("DS", "1.10.1", _bids_config())
+        result = generate_derivative_description("DS", "1.10.1")
         assert isinstance(result, dict)
 
     def test_dataset_type_is_derivative(self):
         """DatasetType is 'derivative'."""
-        result = generate_derivative_description("DS", "1.10.1", _bids_config())
+        result = generate_derivative_description("DS", "1.10.1")
         assert result["DatasetType"] == "derivative"
 
     def test_generated_by_field_present(self):
         """GeneratedBy key is present."""
-        result = generate_derivative_description("DS", "1.10.1", _bids_config())
+        result = generate_derivative_description("DS", "1.10.1")
         assert "GeneratedBy" in result
 
     def test_name_based_on_input(self):
         """Name field is derived from dataset_name."""
-        result = generate_derivative_description("TestDS", "1.10.1", _bids_config())
+        result = generate_derivative_description("TestDS", "1.10.1")
         assert "TestDS" in result["Name"]
+
+    def test_without_bids_config_there_is_no_license(self):
+        """The two-argument call still works and writes no License."""
+        result = generate_derivative_description("DS", "1.10.1")
+        assert list(result) == ["Name", "BIDSVersion", "DatasetType", "GeneratedBy"]
 
     def test_license_from_bids_config(self):
         """License comes from bids_config, as in the raw description, before GeneratedBy."""
