@@ -224,6 +224,7 @@ def generate_dataset_description(
 def generate_derivative_description(
     dataset_name: str,
     bids_version: str,
+    bids_config: BIDSConfig,
 ) -> dict[str, Any]:
     """
     Generate dataset_description.json for a BIDS derivative dataset.
@@ -234,6 +235,9 @@ def generate_derivative_description(
         Name of the dataset
     bids_version : str
         BIDS specification version
+    bids_config : BIDSConfig
+        BIDS specification configuration (from config); gives the License,
+        the same as the raw dataset's
 
     Returns
     -------
@@ -244,6 +248,7 @@ def generate_derivative_description(
         "Name": f"{dataset_name} (preprocessed)",
         "BIDSVersion": bids_version,
         "DatasetType": "derivative",
+        "License": bids_config.license,
         "GeneratedBy": [
             {
                 "Name": "ResXR",

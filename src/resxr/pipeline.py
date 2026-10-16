@@ -938,6 +938,7 @@ def write_dataset_files(config: PipelineConfig, bids: BIDSLayout, subjects: list
         deriv_desc = generate_derivative_description(
             config.output.dataset_name,
             config.output.bids_version,
+            config.bids,
         )
         write_json(deriv_desc, deriv_desc_path)
         logger.info(f"Wrote derivative: {deriv_desc_path.name}")

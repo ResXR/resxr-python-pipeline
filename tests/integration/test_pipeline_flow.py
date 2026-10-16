@@ -360,6 +360,29 @@ def test_untimeable_session_is_skipped_and_the_run_continues(
     assert (bids_root / "README").exists()
 
 
+def test_the_derivative_dataset_has_the_configured_license(tmp_path, minimal_config_dict):
+    data_dir = tmp_path / "sessions"
+    bids_root = tmp_path / "bids_out"
+    _write_session_dir(data_dir, "sess_a", session_id="A")
+    minimal_config_dict["bids"]["license"] = "CC-BY-4.0"
+    cfg_path = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+        ],
+    )
+
+    run(str(cfg_path))
+
+    raw = json.loads((bids_root / "dataset_description.json").read_text(encoding="utf-8"))
+    deriv_path = bids_root / "derivatives" / "resxr" / "dataset_description.json"
+    deriv = json.loads(deriv_path.read_text(encoding="utf-8"))
+    assert raw["License"] == deriv["License"] == "CC-BY-4.0"
+
+
 def test_motion_tsv_columns_match_channels_contract(tmp_path, minimal_config_dict):
     data_dir = tmp_path / "sessions"
     bids_root = tmp_path / "bids_out"
