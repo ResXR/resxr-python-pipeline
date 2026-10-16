@@ -1810,7 +1810,7 @@ def test_read_only_input_files_are_removed_from_sourcedata_of_a_skipped_session(
     assert _session_outputs(bids_root, "sub-01") == []
 
 
-def test_a_rerun_with_overwrite_replaces_a_read_only_sourcedata_copy(
+def test_a_rerun_with_overwrite_copies_over_a_read_only_sourcedata_copy(
     tmp_path, minimal_config_dict, caplog
 ):
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
@@ -1822,6 +1822,17 @@ def test_a_rerun_with_overwrite_replaces_a_read_only_sourcedata_copy(
     assert "Access is denied" not in caplog.text and "Permission denied" not in caplog.text
     sourcedata = tmp_path / "bids_out" / "sourcedata" / "sub-01" / "ses-01"
     assert _files(sourcedata) == _files(data_dir / "sess_a")
+
+
+def test_overwrite_copies_the_input_over_the_sourcedata_copy_and_keeps_other_files(
+    tmp_path, minimal_config_dict
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    assert run(str(cfg)).exit_code == 0  # output.overwrite is true in this config
+    sourcedata = tmp_path / "bids_out" / "sourcedata" / "sub-01" / "ses-01"
+    (sourcedata / "not_in_the_input.txt").write_text("earlier", encoding="utf-8")
+    assert run(str(cfg)).exit_code == 0
+    assert _files(sourcedata) == {**_files(data_dir / "sess_a"), "not_in_the_input.txt": b"earlier"}
 
 
 def test_a_direct_call_removes_the_output_of_a_failing_session(tmp_path, minimal_config_dict):

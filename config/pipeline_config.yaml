@@ -76,12 +76,13 @@ output:
   bids_version: "1.10.1"
   task_name: "VRtracking"
 
-  # What a rerun into an existing output may replace. false keeps a session's
+  # What a rerun into an existing output may overwrite. false keeps a session's
   # existing sourcedata/ copy (a non-empty folder is not copied again) and the
   # existing README and dataset_description.json files (raw and derivatives);
-  # true replaces them. Either way, session files (motion, channels, events,
-  # scans), participants.tsv/.json and reports are always rewritten, and
-  # .bidsignore is written only when absent.
+  # true rewrites those files and copies the input over the sourcedata/ copy
+  # (a file no longer in the input stays there). Either way, session files
+  # (motion, channels, events, scans), participants.tsv/.json and reports are
+  # always rewritten, and .bidsignore is written only when absent.
   overwrite: false
 
   
