@@ -26,7 +26,7 @@ from ...core.constants import GLOBAL_CLOCK_COLUMN
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ...utils import find_internal_zero_blocks
-from ..registry import register_check
+from ..registry import has_global_clock, register_check
 
 logger = get_logger(__name__)
 
@@ -64,19 +64,7 @@ class ClockDropoutCheck:
         if df.empty or "timestamp" not in df.columns:
             return flags
 
-        if GLOBAL_CLOCK_COLUMN not in df.columns:
-            logger.error(
-                "Session '%s': %s: timeSinceStartup column missing — cannot check for clock "
-                "dropouts.  Check alternate_time_columns in pipeline_config.yaml.",
-                session.session_id,
-                stream.system.value,
-            )
-            session.record_check_not_run(
-                self.name,
-                stream.system.value,
-                "no separate timeSinceStartup column (the stream has no per-system clock "
-                "column; see preprocessing.alternate_time_columns)",
-            )
+        if not has_global_clock(self.name, stream, session):
             return flags
 
         timestamps = df["timestamp"].values

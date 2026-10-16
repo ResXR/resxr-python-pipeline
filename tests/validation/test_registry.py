@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import numpy as np
+import pandas as pd
+import pytest
+
 from resxr.core.config import ValidationConfig
 from resxr.core.constants import TrackingSystem
-from resxr.core.session import QualityFlag
+from resxr.core.session import QualityFlag, TrackingStream
 from resxr.validation.registry import CheckRegistry
 
 # ---------------------------------------------------------------------------
@@ -302,6 +306,39 @@ class TestRunAll:
                 "columns in the continuous data)",
             )
         ]
+
+
+@pytest.mark.parametrize("check", ["sampling_rate", "clock_dropout", "hands_tracking_loss"])
+def test_the_timing_checks_share_one_message_for_a_stream_without_its_own_clock(
+    check, full_session, caplog
+):
+    """A stream timed by timeSinceStartup alone: one ERROR, one record, no flags."""
+    import logging
+
+    from resxr.validation import check_registry
+
+    ts = 1.0 + np.arange(100) / 90.0
+    data = pd.DataFrame(
+        {"timestamp": ts, "LeftHand_Root_px": 0.0, "LeftHand_Status_HandTracked": 1}
+    )
+    stream = TrackingStream(system=TrackingSystem.HANDS, data=data, sampling_frequency=90.0)
+    full_session.checks_not_run.clear()
+    with caplog.at_level(logging.ERROR, logger="resxr"):
+        flags = check_registry.get_check(check)(stream, full_session, _make_validation_config([]))
+    assert flags == []
+    assert [r.getMessage() for r in caplog.records] == [
+        f"Session '{full_session.session_id}': {check} not run on Hands: no separate "
+        "timeSinceStartup column (the stream has no per-system clock column; see "
+        "preprocessing.alternate_time_columns), so it can place no flags"
+    ]
+    assert [(c.check, c.stream, c.reason) for c in full_session.checks_not_run] == [
+        (
+            check,
+            "Hands",
+            "no separate timeSinceStartup column (the stream has no per-system clock column; "
+            "see preprocessing.alternate_time_columns)",
+        )
+    ]
 
 
 # ===========================================================================

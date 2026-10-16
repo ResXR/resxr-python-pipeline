@@ -13,7 +13,7 @@ from ...core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ...io.column_maps import get_gaze_measurement_columns
-from ..registry import register_check
+from ..registry import has_global_clock, register_check
 
 logger = get_logger(__name__)
 
@@ -80,19 +80,7 @@ class EyesClosedCheck:
                 self.name, TrackingSystem.FACE.value, f"columns {', '.join(missing)} missing"
             )
             return flags
-        if GLOBAL_CLOCK_COLUMN not in df.columns:
-            logger.error(
-                f"Session '{session.session_id}': "
-                "FACE: timeSinceStartup column missing — "
-                "cannot create eyes_closed flags. "
-                "Check alternate_time_columns in pipeline_config.yaml."
-            )
-            session.record_check_not_run(
-                self.name,
-                TrackingSystem.FACE.value,
-                "no separate timeSinceStartup column (the stream has no per-system clock "
-                "column; see preprocessing.alternate_time_columns)",
-            )
+        if not has_global_clock(self.name, face_stream, session):
             return flags
 
         closed_segments: list[tuple] = []
@@ -118,10 +106,9 @@ class EyesClosedCheck:
         if eyes_stream is not None and not eyes_stream.data.empty and closed_segments:
             if GLOBAL_CLOCK_COLUMN not in eyes_stream.data.columns:
                 logger.error(
-                    f"Session '{session.session_id}': "
-                    "EYES: timeSinceStartup column missing — "
-                    "cannot propagate eyes_closed flags to Eyes stream. "
-                    "Check alternate_time_columns in pipeline_config.yaml."
+                    f"Session '{session.session_id}': eyes_closed flags not carried over to "
+                    "Eyes: no separate timeSinceStartup column in Eyes (the stream has no "
+                    "per-system clock column; see preprocessing.alternate_time_columns)"
                 )
                 session.record_check_not_run(
                     self.name,

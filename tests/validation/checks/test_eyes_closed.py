@@ -406,5 +406,9 @@ class TestEyesClosedReportsWhatItCannotRead:
         session = _make_session_face_only(face, session_metadata)
         with caplog.at_level(logging.ERROR):
             assert EyesClosedCheck()(face, session, _make_config()) == []
-        assert "FACE: timeSinceStartup column missing" in caplog.text
+        assert (
+            f"Session '{session.session_id}': eyes_closed not run on Face: no separate "
+            "timeSinceStartup column (the stream has no per-system clock column; see "
+            "preprocessing.alternate_time_columns), so it can place no flags"
+        ) in caplog.text
         assert [c.check for c in session.checks_not_run] == ["eyes_closed"]

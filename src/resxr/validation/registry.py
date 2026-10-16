@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from ..core.config import ValidationConfig
-from ..core.constants import TrackingSystem
+from ..core.constants import GLOBAL_CLOCK_COLUMN, TrackingSystem
 from ..core.logger import get_logger
 from ..core.session import QualityFlag, Session, TrackingStream
 
@@ -199,6 +199,29 @@ class CheckRegistry:
 
 # Global registry instance
 check_registry = CheckRegistry()
+
+# Why a check cannot place flags on a stream without its own timeSinceStartup column
+_NO_GLOBAL_CLOCK = (
+    "no separate timeSinceStartup column (the stream has no per-system clock column; see "
+    "preprocessing.alternate_time_columns)"
+)
+
+
+def has_global_clock(check: str, stream: TrackingStream, session: Session) -> bool:
+    """Whether *stream* keeps timeSinceStartup next to its own clock.
+
+    Flags are placed on timeSinceStartup, which a stream keeps as a separate
+    column only when it has a per-system clock. Without it, the check logs an
+    ERROR, is recorded as not run on the stream, and should return no flags.
+    """
+    if GLOBAL_CLOCK_COLUMN in stream.data.columns:
+        return True
+    logger.error(
+        f"Session '{session.session_id}': {check} not run on {stream.system.value}: "
+        f"{_NO_GLOBAL_CLOCK}, so it can place no flags"
+    )
+    session.record_check_not_run(check, stream.system.value, _NO_GLOBAL_CLOCK)
+    return False
 
 
 def register_check(check: ValidationCheck) -> ValidationCheck:

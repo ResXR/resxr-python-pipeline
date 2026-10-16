@@ -16,7 +16,7 @@ from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ...io.column_maps import get_hand_measurement_columns
 from ...utils import preview
-from ..registry import register_check
+from ..registry import has_global_clock, register_check
 
 logger = get_logger(__name__)
 
@@ -88,19 +88,7 @@ class HandsTrackingLossCheck:
             },
         )
 
-        if GLOBAL_CLOCK_COLUMN not in df.columns:
-            logger.error(
-                f"Session '{session.session_id}': "
-                f"{stream.system.value}: timeSinceStartup column missing — "
-                "cannot create hands_tracking_loss flags. "
-                "Check alternate_time_columns in pipeline_config.yaml."
-            )
-            session.record_check_not_run(
-                self.name,
-                stream.system.value,
-                "no separate timeSinceStartup column (the stream has no per-system clock "
-                "column; see preprocessing.alternate_time_columns)",
-            )
+        if not has_global_clock(self.name, stream, session):
             return flags
         ts_for_flags = df[GLOBAL_CLOCK_COLUMN].values
 
