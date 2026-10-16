@@ -87,6 +87,37 @@ def check_clock(values: pd.Series, source: Path) -> None:
             )
 
 
+def check_stream_clock(values: pd.Series, session_id: str, system: str, column: str) -> None:
+    """Warn about a per-system clock column in milliseconds or stepping backward.
+
+    The column is a stream's own clock (``preprocessing.alternate_time_columns``).
+    Its zero and empty cells are not reported here: leading and trailing ones
+    are normal, and those between valid values are flagged by the clock_dropout
+    check. A value repeats while the SDK sample does not change, so the median
+    is taken over the steps between distinct values. Nothing is changed.
+    """
+    if not pd.api.types.is_numeric_dtype(values):
+        return  # left to the stream check, which skips the session
+    t = values.to_numpy(dtype=float)
+    steps = np.diff(t[np.isfinite(t) & (t != 0)])
+    where = f"Session '{session_id}': clock column '{column}' for {system}"
+    backward = int((steps < 0).sum())
+    if backward:
+        logger.warning(
+            f"{where} goes backward {backward} time(s). Rows are kept in file order, so the "
+            f"{system} latency decreases there; sort the rows if they were written out of order"
+        )
+    forward = steps[steps > 0]
+    median_step = float(np.median(forward)) if forward.size else 0.0
+    if median_step > _CLOCK_STEP_LOOKS_LIKE_MS:
+        logger.warning(
+            f"{where} has a median step of {median_step:.4g}, so the column looks like "
+            f"milliseconds or {system} was sampled slower than 2 Hz. It is read as seconds and "
+            f"not converted: if it holds milliseconds, the {system} latency and effective "
+            "sampling rate will be wrong. Write it in seconds"
+        )
+
+
 def load_continuous_data(csv_path: Path) -> pd.DataFrame:
     """
     Load ContinuousData CSV with proper dtype handling.

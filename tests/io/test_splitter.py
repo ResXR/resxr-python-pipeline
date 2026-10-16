@@ -378,3 +378,87 @@ class TestDroppedStreamsAreReported:
         self._split(_make_session(session_metadata, extra), caplog)
         assert "12 match no tracking-system prefix (Lab_00, " in caplog.text
         assert "Lab_09, ... (2 more))" in caplog.text
+
+
+# ===========================================================================
+# A stream's own clock column is checked (milliseconds, backward steps)
+# ===========================================================================
+
+
+class TestStreamClocksAreChecked:
+    @staticmethod
+    def _split(session_metadata, continuous_df, caplog, hands_clock, face_clock=None):
+        import logging
+
+        import numpy as np
+
+        from tests.conftest import _face_df
+
+        session = _make_session(
+            session_metadata, continuous_df.assign(Node_HandLeft_Time=hands_clock)
+        )
+        face = _face_df().drop(columns="timeSinceStartup")  # as load_face_data returns it
+        session.raw_face_data = face.assign(
+            Face_Time=face_clock if face_clock is not None else face["timestamp"] + 50.0
+        )
+        clocks = {"Hands": "Node_HandLeft_Time", "Face": "Face_Time"}
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            streams = split_continuous_data(
+                session, None, SAMPLING_FREQS, alternate_time_columns=clocks
+            )
+        np.testing.assert_array_equal(  # never converted or sorted
+            streams[TrackingSystem.HANDS].data["timestamp"].to_numpy(), hands_clock
+        )
+        return [r.getMessage() for r in caplog.records if "clock column" in r.getMessage()]
+
+    @staticmethod
+    def _sdk_clock(n: int = 200, start: float = 589456.25):
+        """An SDK clock as the template writes it: new samples at 72 Hz, rows at 90 Hz."""
+        import numpy as np
+
+        clock = start + np.floor(np.arange(n) * 72.0 / 90.0) / 72.0
+        clock[:5] = 0.0  # not tracked yet: leading zeros are normal
+        return clock
+
+    def test_a_valid_clock_with_repeated_values_and_edge_zeros_is_silent(
+        self, session_metadata, continuous_df, caplog
+    ):
+        import numpy as np
+
+        clock = self._sdk_clock()
+        clock[100:103] = np.nan  # empty cells are left to the clock_dropout check
+        clock[150:152] = 0.0  # as are zeros between valid values
+        face = np.repeat(1000.0 + np.arange(100) / 30.0, 2)  # each face sample in 2 rows
+        assert self._split(session_metadata, continuous_df, caplog, clock, face) == []
+
+    def test_milliseconds_are_reported_naming_the_column(
+        self, session_metadata, continuous_df, caplog
+    ):
+        clock = self._sdk_clock() * 1000.0
+        assert self._split(session_metadata, continuous_df, caplog, clock) == [
+            "Session 'test': clock column 'Node_HandLeft_Time' for Hands has a median step of "
+            "13.89, so the column looks like milliseconds or Hands was sampled slower than 2 Hz. "
+            "It is read as seconds and not converted: if it holds milliseconds, the Hands "
+            "latency and effective sampling rate will be wrong. Write it in seconds"
+        ]
+
+    def test_backward_steps_are_counted_naming_the_column(
+        self, session_metadata, continuous_df, caplog
+    ):
+        clock = self._sdk_clock()
+        clock[100:140] = clock[100:140][::-1]
+        assert self._split(session_metadata, continuous_df, caplog, clock) == [
+            "Session 'test': clock column 'Node_HandLeft_Time' for Hands goes backward 31 "
+            "time(s). Rows are kept in file order, so the Hands latency decreases there; sort "
+            "the rows if they were written out of order"
+        ]
+
+    def test_the_face_clock_is_checked_too(self, session_metadata, continuous_df, caplog):
+        import numpy as np
+
+        face = 1000.0 * (1000.0 + np.repeat(np.arange(100) / 30.0, 2))
+        messages = self._split(session_metadata, continuous_df, caplog, self._sdk_clock(), face)
+        assert [m.split(" has a median step of ")[0] for m in messages] == [
+            "Session 'test': clock column 'Face_Time' for Face"
+        ]
+        assert "33.33, so the column looks like milliseconds or Face was sampled" in messages[0]

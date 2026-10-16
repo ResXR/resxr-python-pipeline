@@ -13,6 +13,9 @@ Time column handling:
   ``timestamp`` column is preserved as ``timeSinceStartup``.
 - If no alternate is configured, ``timestamp`` remains as-is and
   ``timeSinceStartup`` is absent from the stream.
+- A configured clock column that is used is checked for milliseconds and
+  backward steps (``readers.check_stream_clock``), with a warning naming
+  the column; its values are not changed.
 
 BIDS LATENCY channels are **not** computed here.  That is handled
 downstream by ``prepare_motion_data`` in the preprocessing module,
@@ -27,6 +30,7 @@ from ..core.logger import get_logger
 from ..core.session import Session, SessionMetadata, TrackingStream
 from ..utils import preview
 from .column_maps import get_columns_for_system
+from .readers import check_stream_clock
 
 logger = get_logger(__name__)
 
@@ -254,6 +258,7 @@ def split_continuous_data(
                     system_df = system_df.rename(columns={"timestamp": GLOBAL_CLOCK_COLUMN})
                 system_df = system_df.rename(columns={alt_time_col: "timestamp"})
                 logger.debug(f"Using {alt_time_col} as timestamp for {system.value}")
+                check_stream_clock(system_df["timestamp"], sid, system.value, alt_time_col)
 
         # Determine data (non-time) columns
         data_cols = [c for c in system_df.columns if c not in ("timestamp", GLOBAL_CLOCK_COLUMN)]
@@ -310,6 +315,7 @@ def split_continuous_data(
                 face_df = face_df.rename(columns={"timestamp": GLOBAL_CLOCK_COLUMN})
             face_df = face_df.rename(columns={clock: "timestamp"})
             logger.debug(f"Using {clock} as timestamp for Face")
+            check_stream_clock(face_df["timestamp"], sid, "Face", clock)
 
         data_cols = [c for c in face_df.columns if c not in ("timestamp", GLOBAL_CLOCK_COLUMN)]
 
