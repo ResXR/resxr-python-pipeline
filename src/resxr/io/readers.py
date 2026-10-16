@@ -48,7 +48,8 @@ def check_clock(values: pd.Series, source: Path, head_rate: float | None = None)
     The column must be in seconds, never step backward and have a value in every
     row. Leading and trailing zero rows are allowed (before onset and after
     offset); a zero between valid values is counted, and so is an empty, NaN or
-    infinite cell anywhere. Steps longer than 10 times the expected Head
+    infinite cell anywhere. These rows are left out of the step checks below
+    (backward steps, milliseconds, gaps). Steps longer than 10 times the expected Head
     interval (1 / *head_rate*, from ``sampling_frequencies``; without it, the
     median step) are reported at INFO, since valid recordings can have them;
     not when the column looks like milliseconds, since the gaps would then be

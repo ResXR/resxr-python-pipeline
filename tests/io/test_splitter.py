@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+
+import numpy as np
 import pandas as pd
 import pytest
 
 from resxr.core.constants import TrackingSystem
+from resxr.core.exceptions import ConfigurationError
 from resxr.core.session import Session, SessionMetadata, TrackingStream
 from resxr.io.splitter import is_system_enabled, split_continuous_data
+from tests.conftest import _face_df
 
 # ===========================================================================
 # Helper
@@ -186,8 +191,6 @@ class TestSplitContinuousData:
 
     def test_face_from_raw_face_data(self, session_metadata, continuous_df):
         """FACE stream is created from raw_face_data when present and face is enabled."""
-        from tests.conftest import _face_df
-
         session = _make_session(session_metadata, continuous_df)
         session.raw_face_data = _face_df()
         result = split_continuous_data(session, None, SAMPLING_FREQS)
@@ -195,8 +198,6 @@ class TestSplitContinuousData:
 
     def test_missing_sampling_freq_for_enabled_system_raises(self, session_metadata, continuous_df):
         """Enabled system without a sampling_frequency entry raises ConfigurationError."""
-        from resxr.core.exceptions import ConfigurationError
-
         session = _make_session(session_metadata, continuous_df)
         incomplete_freqs = {"Eyes": 90.0}  # missing Head, Hands
         with pytest.raises(ConfigurationError, match="sampling_frequencies"):
@@ -211,8 +212,6 @@ class TestSplitContinuousData:
 class TestDroppedStreamsAreReported:
     @staticmethod
     def _split(session, caplog, enabled_systems=None, alternate_time_columns=None):
-        import logging
-
         with caplog.at_level(logging.INFO, logger="resxr"):
             return split_continuous_data(
                 session,
@@ -288,8 +287,6 @@ class TestDroppedStreamsAreReported:
         ) in caplog.text
 
     def test_face_file_without_rows_warns(self, session_metadata, continuous_df, caplog):
-        from tests.conftest import _face_df
-
         session = _make_session(session_metadata, continuous_df)
         session.raw_face_data = _face_df().iloc[:0]
         result = self._split(session, caplog)
@@ -297,8 +294,6 @@ class TestDroppedStreamsAreReported:
         assert "Session 'test': Face not exported: the face file has no data rows" in caplog.text
 
     def test_face_file_with_face_enabled_missing_warns(self, continuous_df, caplog):
-        from tests.conftest import _face_df
-
         metadata = SessionMetadata(
             session_id="test",
             hands_enabled=True,
@@ -319,8 +314,6 @@ class TestDroppedStreamsAreReported:
     def test_face_file_without_its_clock_column_warns(
         self, session_metadata, continuous_df, caplog
     ):
-        from tests.conftest import _face_df
-
         session = _make_session(session_metadata, continuous_df)
         session.raw_face_data = _face_df()  # no Face_Time column
         result = self._split(session, caplog, alternate_time_columns={"Face": "Face_Time"})
@@ -335,8 +328,6 @@ class TestDroppedStreamsAreReported:
         )
 
     def test_valid_session_has_no_warning(self, session_metadata, continuous_df, caplog):
-        from tests.conftest import _face_df
-
         template_like = continuous_df.drop(columns=["Eyes_Closed_L", "Eyes_Closed_R"])
         session = _make_session(session_metadata, template_like)
         session.raw_face_data = _face_df()
@@ -388,12 +379,6 @@ class TestDroppedStreamsAreReported:
 class TestStreamClocksAreChecked:
     @staticmethod
     def _split(session_metadata, continuous_df, caplog, hands_clock, face_clock=None):
-        import logging
-
-        import numpy as np
-
-        from tests.conftest import _face_df
-
         session = _make_session(
             session_metadata, continuous_df.assign(Node_HandLeft_Time=hands_clock)
         )
@@ -414,8 +399,6 @@ class TestStreamClocksAreChecked:
     @staticmethod
     def _sdk_clock(n: int = 200, start: float = 589456.25):
         """An SDK clock as the template writes it: new samples at 72 Hz, rows at 90 Hz."""
-        import numpy as np
-
         clock = start + np.floor(np.arange(n) * 72.0 / 90.0) / 72.0
         clock[:5] = 0.0  # not tracked yet: leading zeros are normal
         return clock
@@ -423,8 +406,6 @@ class TestStreamClocksAreChecked:
     def test_a_valid_clock_with_repeated_values_and_edge_zeros_is_silent(
         self, session_metadata, continuous_df, caplog
     ):
-        import numpy as np
-
         clock = self._sdk_clock()
         clock[100:103] = np.nan  # empty cells are left to the clock_dropout check
         clock[150:152] = 0.0  # as are zeros between valid values
@@ -454,8 +435,6 @@ class TestStreamClocksAreChecked:
         ]
 
     def test_the_face_clock_is_checked_too(self, session_metadata, continuous_df, caplog):
-        import numpy as np
-
         face = 1000.0 * (1000.0 + np.repeat(np.arange(100) / 30.0, 2))
         messages = self._split(session_metadata, continuous_df, caplog, self._sdk_clock(), face)
         assert [m.split(" has a median step of ")[0] for m in messages] == [

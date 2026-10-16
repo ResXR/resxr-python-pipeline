@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,7 +14,12 @@ import pandas as pd
 import pytest
 import yaml
 
-from resxr.pipeline import run
+import resxr.pipeline as pipeline_module
+from resxr.bids.layout import BIDSLayout
+from resxr.cli import main
+from resxr.core.config import PipelineConfig, SessionMapping
+from resxr.core.exceptions import DataLoadError
+from resxr.pipeline import _SessionOutputs, process_session_from_mapping, run
 
 _REAL_CSV_METADATA = {
     "session_id": "real_csv_session",
@@ -257,6 +263,15 @@ def _edit_continuous(session_dir: Path, edit) -> None:
     edit(pd.read_csv(path)).to_csv(path, index=False)
 
 
+def _edit_metadata(session_dir: Path, edit) -> Path:
+    """Apply *edit* (which changes the dict in place) to the session's metadata file."""
+    path = session_dir / "session_metadata.json"
+    metadata = json.loads(path.read_text(encoding="utf-8"))
+    edit(metadata)
+    path.write_text(json.dumps(metadata), encoding="utf-8")
+    return path
+
+
 def _zero_hands_clock(session_dir: Path) -> None:
     _edit_continuous(session_dir, lambda df: df.assign(Node_HandLeft_Time=0.0))
 
@@ -289,10 +304,7 @@ def _keep_one_row(session_dir: Path) -> None:
 
 
 def _add_face_file_without_clocks(session_dir: Path) -> None:
-    metadata_path = session_dir / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["face_enabled"] = True
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    _edit_metadata(session_dir, lambda m: m.update(face_enabled=True))
     face = pd.DataFrame({"Eyes_Closed_L": [0.0, 0.0, 0.0]})
     face.to_csv(session_dir / "BAD_FaceExpressionData.csv", index=False)
 
@@ -754,10 +766,7 @@ def test_events_and_motion_share_the_main_data_time_zero(tmp_path, minimal_confi
         "Hands": "Node_HandLeft_Time",
     }
     session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
-    metadata_path = session_dir / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["face_enabled"] = True
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    _edit_metadata(session_dir, lambda m: m.update(face_enabled=True))
     face = pd.DataFrame({"timeSinceStartup": [1.011111, 1.022222], "Eyes_Closed_L": [0.0, 0.0]})
     face.to_csv(session_dir / "A_FaceExpressionData.csv", index=False)
     cfg = _write_config(
@@ -803,10 +812,7 @@ def test_masking_blanks_hand_and_gaze_measurements_only(tmp_path, minimal_config
     face = {"timeSinceStartup": t, "Face_Time": t + 300.0, "Eyes_Closed_L": closed}
     face["Eyes_Closed_R"] = closed
     pd.DataFrame(face).to_csv(session_dir / "M_FaceExpressionData.csv", index=False)
-    metadata_path = session_dir / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata.update(face_enabled=True, eyes_enabled=True)
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    _edit_metadata(session_dir, lambda m: m.update(face_enabled=True, eyes_enabled=True))
     minimal_config_dict["validation"] = {
         "enabled_checks": ["hands_tracking_loss", "eyes_closed"],
         "settings": {"eyes_closed_use_min_duration": False},
@@ -844,10 +850,9 @@ def test_pipeline_scans_acq_time_keeps_subseconds_and_utc(tmp_path, minimal_conf
     data_dir = tmp_path / "sessions"
     bids_root = tmp_path / "bids_out"
     session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
-    metadata_path = session_dir / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["utc_start_iso8601"] = "2026-06-10T10:14:19.4723370Z"
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    _edit_metadata(
+        session_dir, lambda m: m.update(utc_start_iso8601="2026-06-10T10:14:19.4723370Z")
+    )
 
     cfg_path = _write_config(
         tmp_path,
@@ -923,11 +928,13 @@ def _write_clocked_session_dir(data_dir: Path, name: str, *, session_id: str) ->
     return session_dir
 
 
-def _two_session_config(tmp_path, minimal_config_dict, *, second="sess_b"):
+def _two_session_config(tmp_path, minimal_config_dict, *, missing_second=False):
+    """Two clocked sessions mapped to sub-01 and sub-02 (the second folder absent if asked)."""
     data_dir = tmp_path / "sessions"
     _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
-    if second == "sess_b":
-        _write_clocked_session_dir(data_dir, "sess_b", session_id="B")
+    second = "sess_missing" if missing_second else "sess_b"
+    if not missing_second:
+        _write_clocked_session_dir(data_dir, second, session_id="B")
     minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
         "Head": "Node_Head_Time",
         "Hands": "Node_HandLeft_Time",
@@ -947,8 +954,6 @@ def _two_session_config(tmp_path, minimal_config_dict, *, second="sess_b"):
 def test_run_returns_every_session_and_exit_code_0_when_all_processed(
     tmp_path, minimal_config_dict, caplog
 ):
-    from resxr.cli import main
-
     _, cfg = _two_session_config(tmp_path, minimal_config_dict)
     with caplog.at_level(logging.INFO, logger="resxr"):
         result = run(str(cfg))
@@ -965,9 +970,7 @@ def test_run_returns_every_session_and_exit_code_0_when_all_processed(
 def test_a_skipped_session_gives_a_warning_summary_and_exit_code_1(
     tmp_path, minimal_config_dict, caplog
 ):
-    from resxr.cli import main
-
-    _, cfg = _two_session_config(tmp_path, minimal_config_dict, second="sess_missing")
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict, missing_second=True)
     with caplog.at_level(logging.INFO, logger="resxr"):
         result = run(str(cfg))
     assert [s.processed for s in result.sessions] == [True, False]
@@ -981,9 +984,7 @@ def test_a_skipped_session_gives_a_warning_summary_and_exit_code_1(
 
 
 def test_quiet_run_still_shows_a_skipped_session_and_exits_1(tmp_path, minimal_config_dict, capsys):
-    from resxr.cli import main
-
-    _, cfg = _two_session_config(tmp_path, minimal_config_dict, second="sess_missing")
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict, missing_second=True)
     resxr_logger = logging.getLogger("resxr")
     level, handlers = resxr_logger.level, list(resxr_logger.handlers)
     try:
@@ -1002,8 +1003,6 @@ def test_quiet_run_still_shows_a_skipped_session_and_exits_1(tmp_path, minimal_c
 def test_every_session_failing_gives_an_error_summary_and_exit_code_1(
     tmp_path, minimal_config_dict, caplog
 ):
-    from resxr.cli import main
-
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
     for name in ("sess_a", "sess_b"):
         (data_dir / name / "session_metadata.json").unlink()
@@ -1017,8 +1016,6 @@ def test_every_session_failing_gives_an_error_summary_and_exit_code_1(
 
 def _fail_session_a(monkeypatch, error: BaseException) -> None:
     """Make the split of session 'A' raise *error*; other sessions are split as usual."""
-    import resxr.pipeline as pipeline_module
-
     split = pipeline_module.split_continuous_data
 
     def split_or_fail(session, *args, **kwargs):
@@ -1032,8 +1029,6 @@ def _fail_session_a(monkeypatch, error: BaseException) -> None:
 def test_an_unexpected_error_skips_only_that_session(
     tmp_path, minimal_config_dict, caplog, monkeypatch
 ):
-    from resxr.cli import main
-
     _, cfg = _two_session_config(tmp_path, minimal_config_dict)
     _fail_session_a(monkeypatch, ValueError("boom"))
     with caplog.at_level(logging.DEBUG, logger="resxr"):
@@ -1055,8 +1050,6 @@ def test_an_unexpected_error_skips_only_that_session(
 def test_keyboard_interrupt_in_a_session_still_stops_the_run(
     tmp_path, minimal_config_dict, monkeypatch
 ):
-    from resxr.cli import main
-
     _, cfg = _two_session_config(tmp_path, minimal_config_dict)
     _fail_session_a(monkeypatch, KeyboardInterrupt())
     with pytest.raises(KeyboardInterrupt):
@@ -1104,10 +1097,7 @@ def _run_with_every_stream_check(
     """
     data_dir = tmp_path / "sessions"
     session_dir = _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
-    metadata_path = session_dir / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    edit_metadata(metadata)
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    _edit_metadata(session_dir, edit_metadata)
     if face_file:
         pd.DataFrame(
             {
@@ -1256,10 +1246,7 @@ def test_the_not_run_reason_says_why_the_stream_is_absent(
     session_dir = _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
     _edit_continuous(session_dir, edit)
     if why.startswith("metadata: hands_enabled missing"):
-        metadata_path = session_dir / "session_metadata.json"
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        metadata.pop("hands_enabled")
-        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        _edit_metadata(session_dir, lambda m: m.pop("hands_enabled"))
     minimal_config_dict["validation"]["enabled_checks"] = ["hands_tracking_loss"]
     minimal_config_dict["preprocessing"]["alternate_time_columns"] = {"Head": "Node_Head_Time"}
     cfg = _write_config(
@@ -1281,10 +1268,7 @@ def test_a_null_or_empty_session_id_is_read_as_unknown(
 ):
     data_dir = tmp_path / "sessions"
     session_dir = _write_session_dir(data_dir, "sess_a", session_id="A")
-    metadata_path = session_dir / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata["session_id"] = session_id
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    metadata_path = _edit_metadata(session_dir, lambda m: m.update(session_id=session_id))
     (session_dir / "A_CustomTables").mkdir()
     cfg = _write_config(
         tmp_path,
@@ -1310,8 +1294,6 @@ def test_a_null_or_empty_session_id_is_read_as_unknown(
 def test_nested_sessions_without_mappings_are_an_error_with_exit_code_1(
     tmp_path, minimal_config_dict, caplog
 ):
-    from resxr.cli import main
-
     data_dir = tmp_path / "DATA"
     _write_session_dir(data_dir / "Project" / "Task", "sess_a", session_id="A")
     cfg = _write_config(
@@ -1418,8 +1400,6 @@ def test_a_session_skipped_at_the_split_leaves_no_output(tmp_path, minimal_confi
 
 def _fail_report_of_session_a(monkeypatch) -> None:
     """Write session A's report, then raise, as a late error in the report step would."""
-    import resxr.pipeline as pipeline_module
-
     generate = pipeline_module.ReportGenerator.generate
 
     def generate_or_fail(self, session, output_path, *args, **kwargs):
@@ -1492,8 +1472,8 @@ def test_a_session_folder_that_existed_before_is_kept_with_a_warning(
     after = {tree: _files(tree) for tree in _session_outputs(bids_root, "sub-01")}
     assert after.keys() == before.keys()  # every folder kept
     sourcedata_tree = bids_root / "sourcedata" / "sub-01"
-    for tree in before:  # raw and derivative files kept as they were
-        assert after[tree] == before[tree] or tree == sourcedata_tree
+    for tree in before.keys() - {sourcedata_tree}:  # raw and derivative files kept as they were
+        assert after[tree] == before[tree]
     # the sourcedata copy was redone (output.overwrite) before the session failed
     assert after[sourcedata_tree].keys() == before[sourcedata_tree].keys()
     assert after[sourcedata_tree] != before[sourcedata_tree]
@@ -1529,9 +1509,6 @@ def test_a_session_skipped_while_loading_writes_and_removes_nothing(
 
 
 def test_removal_never_reaches_the_input_or_outside_the_output(tmp_path, minimal_config_dict):
-    from resxr.core.config import PipelineConfig
-    from resxr.pipeline import _SessionOutputs
-
     minimal_config_dict["input"]["data_dir"] = str(tmp_path / "data")
     minimal_config_dict["output"]["bids_root"] = str(tmp_path / "data" / "out")
     config = PipelineConfig.model_validate(minimal_config_dict)
@@ -1722,7 +1699,6 @@ def test_every_session_skipped_leaves_no_empty_output_folders(
 ):
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
     _edit_config(cfg, lambda c: c["report"].update(enabled=True))
-    import resxr.pipeline as pipeline_module
 
     def fail_every_report(self, session, output_path, *args, **kwargs):
         output_path.write_text("partial", encoding="utf-8")
@@ -1797,8 +1773,6 @@ def test_a_filesystem_error_while_removing_is_a_warning_and_the_run_continues(
 
 
 def _make_read_only(folder: Path) -> None:
-    import stat
-
     for path in folder.rglob("*"):
         if path.is_file():
             path.chmod(stat.S_IREAD)
@@ -1833,11 +1807,6 @@ def test_a_rerun_with_overwrite_replaces_a_read_only_sourcedata_copy(
 
 
 def test_a_direct_call_removes_the_output_of_a_failing_session(tmp_path, minimal_config_dict):
-    from resxr.bids.layout import BIDSLayout
-    from resxr.core.config import PipelineConfig, SessionMapping
-    from resxr.core.exceptions import DataLoadError
-    from resxr.pipeline import process_session_from_mapping
-
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
     _zero_hands_clock(data_dir / "sess_a")
     config = PipelineConfig.from_yaml(cfg)
@@ -1851,8 +1820,6 @@ def test_a_direct_call_removes_the_output_of_a_failing_session(tmp_path, minimal
 def test_keyboard_interrupt_removes_the_output_of_the_interrupted_session(
     tmp_path, minimal_config_dict, caplog, monkeypatch
 ):
-    import resxr.pipeline as pipeline_module
-
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
     _edit_config(cfg, lambda c: c["report"].update(enabled=True))
 
@@ -1871,9 +1838,7 @@ def test_keyboard_interrupt_removes_the_output_of_the_interrupted_session(
 
 def test_two_sessions_sharing_a_report_path_are_named(tmp_path, minimal_config_dict, caplog):
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
-    metadata_path = data_dir / "sess_b" / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata_path.write_text(json.dumps({**metadata, "session_id": "A"}), encoding="utf-8")
+    _edit_metadata(data_dir / "sess_b", lambda m: m.update(session_id="A"))
     reports = tmp_path / "reports"
     _edit_config(cfg, lambda c: c["report"].update(enabled=True, output_dir=str(reports)))
     with caplog.at_level(logging.INFO, logger="resxr"):
@@ -1930,9 +1895,7 @@ def test_a_face_file_without_a_clock_column_names_the_expected_format(
         lambda c: c["preprocessing"]["alternate_time_columns"].update(Face="Face_Time"),
     )
     session_dir = data_dir / "sess_a"
-    metadata_path = session_dir / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata_path.write_text(json.dumps({**metadata, "face_enabled": True}), encoding="utf-8")
+    _edit_metadata(session_dir, lambda m: m.update(face_enabled=True))
     face = session_dir / "A_FaceExpressionData.csv"
     face.write_text(face_text, encoding="utf-8")
     with caplog.at_level(logging.INFO, logger="resxr"):
@@ -1965,9 +1928,7 @@ def test_a_face_file_that_pandas_cannot_tokenize_names_the_expected_format(
 def test_a_text_fixed_delta_time_no_longer_stops_the_report(tmp_path, minimal_config_dict):
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
     _edit_config(cfg, lambda c: c["report"].update(enabled=True))
-    metadata_path = data_dir / "sess_a" / "session_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-    metadata_path.write_text(json.dumps({**metadata, "fixedDeltaTime": "0.02"}), encoding="utf-8")
+    _edit_metadata(data_dir / "sess_a", lambda m: m.update(fixedDeltaTime="0.02"))
     assert run(str(cfg)).exit_code == 0
     report = (tmp_path / "bids_out" / "sub-01" / "ses-01" / "A_report.html").read_text("utf-8")
     assert "<tr><th>Fixed delta time</th><td>0.0200 s</td></tr>" in report

@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
 
+import resxr.validation.checks.sampling_rate  # noqa: F401
+import resxr.validation.checks.stats  # noqa: F401
 from resxr.core.config import ValidationConfig
 from resxr.core.constants import TrackingSystem
 from resxr.core.session import QualityFlag, TrackingStream
-from resxr.validation.registry import CheckRegistry
+from resxr.validation.registry import CheckRegistry, check_registry, register_check
 
 # ---------------------------------------------------------------------------
 # Minimal stub checks for isolated tests
@@ -260,8 +264,6 @@ class TestRunAll:
         self, head_stream, minimal_session, caplog
     ):
         """A multi-stream check without its stream is recorded and logged once per session."""
-        import logging
-
         registry = CheckRegistry()
         registry.register(_MultiStreamCheck())
         config = _make_validation_config(["multi_stream"])
@@ -313,10 +315,6 @@ def test_the_timing_checks_share_one_message_for_a_stream_without_its_own_clock(
     check, full_session, caplog
 ):
     """A stream timed by timeSinceStartup alone: one ERROR, one record, no flags."""
-    import logging
-
-    from resxr.validation import check_registry
-
     ts = 1.0 + np.arange(100) / 90.0
     data = pd.DataFrame(
         {"timestamp": ts, "LeftHand_Root_px": 0.0, "LeftHand_Status_HandTracked": 1}
@@ -379,7 +377,6 @@ class TestValidationCheckProtocol:
 class TestRegisterCheckDecorator:
     def test_decorator_registers_to_global_registry(self):
         """register_check(instance) adds the check to the global check_registry."""
-        from resxr.validation.registry import check_registry, register_check
 
         class _UniqueDecoratorCheck:
             name = "_test_decorator_unique_12345"
@@ -398,10 +395,6 @@ class TestRegisterCheckDecorator:
     def test_real_checks_registered_at_import_time(self):
         """Built-in checks (sampling_rate, stats_summary) are in the global registry."""
         # Force import of all check modules so they register
-        import resxr.validation.checks.sampling_rate  # noqa: F401
-        import resxr.validation.checks.stats  # noqa: F401
-        from resxr.validation.registry import check_registry
-
         assert "sampling_rate" in check_registry.available_checks
         assert "stats_summary" in check_registry.available_checks
 

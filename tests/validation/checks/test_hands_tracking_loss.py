@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -330,8 +332,6 @@ class TestHandsTrackingLossClockDropout:
 
     def test_missing_timeSinceStartup_returns_empty_and_logs_error(self, full_session, caplog):
         """If timeSinceStartup is absent the check must return [] and log an error."""
-        import logging
-
         n = 50
         ts = make_timestamps(n, 90.0, 1.0)
         left = np.zeros(n, dtype=int)  # all tracking lost
@@ -365,8 +365,6 @@ def _flag_spans(flags):
 
 class TestHandsTrackingLossReportsWhatItCannotRead:
     def test_missing_flag_column_warns_and_is_recorded(self, full_session, caplog):
-        import logging
-
         stream = _make_hands_stream(left_tracked=np.r_[np.ones(50), np.zeros(50)])
         stream.data = stream.data.drop(columns="RightHand_Status_HandTracked")
         with caplog.at_level(logging.WARNING):
@@ -385,8 +383,6 @@ class TestHandsTrackingLossReportsWhatItCannotRead:
         ]
 
     def test_text_labels_warn_and_make_no_flags_for_that_column(self, full_session, caplog):
-        import logging
-
         labels = np.array(["Tracked"] * 60 + ["Lost"] * 40, dtype=object)
         stream = _make_hands_stream(left_tracked=labels)
         with caplog.at_level(logging.WARNING):
@@ -402,8 +398,6 @@ class TestHandsTrackingLossReportsWhatItCannotRead:
         )
 
     def test_numeric_values_other_than_0_and_1_make_no_flags(self, full_session, caplog):
-        import logging
-
         stream = _make_hands_stream(left_tracked=np.r_[np.full(50, 0.5), np.zeros(50)])
         with caplog.at_level(logging.WARNING):
             flags = HandsTrackingLossCheck()(stream, full_session, _make_config())

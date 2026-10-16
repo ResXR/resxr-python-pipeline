@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -379,8 +381,6 @@ class TestEyesClosedMinDuration:
 
 class TestEyesClosedReportsWhatItCannotRead:
     def test_missing_eyes_closed_column_warns_and_is_recorded(self, session_metadata, caplog):
-        import logging
-
         n = 100
         face = _make_face_stream(n=n, left_values=np.full(n, 0.95), right_values=np.full(n, 0.95))
         face.data = face.data.rename(columns={"Eyes_Closed_R": "EyesClosed_R"})
@@ -399,8 +399,6 @@ class TestEyesClosedReportsWhatItCannotRead:
     def test_missing_timeSinceStartup_is_recorded_even_without_closures(
         self, session_metadata, caplog
     ):
-        import logging
-
         face = _make_face_stream()  # eyes open throughout
         face.data = face.data.drop(columns="timeSinceStartup")
         session = _make_session_face_only(face, session_metadata)

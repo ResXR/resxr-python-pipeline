@@ -12,6 +12,7 @@ from resxr.cli import build_parser, main
 from resxr.core.config import PipelineConfig
 from resxr.core.exceptions import ConfigurationError
 from resxr.pipeline import validate_config
+from resxr.validation import check_registry
 
 _MASKING_NOT_ENABLED = (
     "preprocessing.masking_checks names check(s) {names} that are not in "
@@ -33,6 +34,13 @@ _UNKNOWN_SETTINGS = (
     "validation.settings has unknown key(s) {keys}; keys the registered checks read: {known}; "
     "a check that reads a settings key must list it in its settings_keys"
 )
+
+
+def _write(tmp_path: Path, config: dict) -> Path:
+    """Write *config* to tmp_path/config.yaml and return the path."""
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.dump(config), encoding="utf-8")
+    return path
 
 
 def _mapping(source_dir: str, subject_id: str, session_label: str = "01") -> dict:
@@ -131,8 +139,7 @@ class TestMainDryRun:
 
     def test_dry_run_rejects_misspelled_check_name(self, tmp_path, minimal_config_dict, caplog):
         minimal_config_dict["validation"]["enabled_checks"] = ["hand_tracking_loss"]
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert "validation.enabled_checks names unknown check(s) ['hand_tracking_loss']" in (
             caplog.text
@@ -145,16 +152,14 @@ class TestMainDryRun:
         minimal_config_dict["preprocessing"].update(
             apply_quality_masking=True, masking_checks=["eyes_closed"]
         )
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert f"Configuration error in {path}: " in caplog.text
         assert _MASKING_NOT_ENABLED.format(names="['eyes_closed']") in caplog.text
 
     def test_dry_run_rejects_an_unknown_nested_key(self, tmp_path, minimal_config_dict, caplog):
         minimal_config_dict["preprocessing"]["apply_quality_maskin"] = True
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert f"Configuration error in {path}: " in caplog.text
         assert "preprocessing.apply_quality_maskin\n  Extra inputs are not permitted" in (
@@ -163,8 +168,7 @@ class TestMainDryRun:
 
     def test_dry_run_rejects_an_unknown_settings_key(self, tmp_path, minimal_config_dict, caplog):
         minimal_config_dict["validation"]["settings"] = {"sampling_rate_tolerence": 0.2}
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert f"Configuration error in {path}: " in caplog.text
         assert (
@@ -180,8 +184,7 @@ class TestMainDryRun:
         del minimal_config_dict["sampling_frequencies"]["Eyes"]
         del minimal_config_dict["sampling_frequencies"]["Body"]
         minimal_config_dict["systems"] = {"Body": {"enabled": False}}
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert "sampling_frequencies has no entry for ['Eyes'], which is enabled;" in caplog.text
         assert "Body" not in caplog.text  # disabled, so it needs no rate
@@ -190,8 +193,7 @@ class TestMainDryRun:
         self, tmp_path, minimal_config_dict, caplog
     ):
         minimal_config_dict["system_descriptions"]["Hand"] = "Hand tracking"
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert (
             f"Configuration error in {path}: system_descriptions names unknown tracking "
@@ -203,8 +205,7 @@ class TestMainDryRun:
         self, tmp_path, minimal_config_dict, caplog
     ):
         minimal_config_dict["input"]["data_dir"] = str(tmp_path / "no_such_folder")
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path), "--dry-run"]) == 1
         assert (
             f"Configuration error in {path}: input.data_dir does not exist: "
@@ -219,8 +220,7 @@ class TestMainDryRun:
         (tmp_path / "a_file").write_text("x")
         for data_dir, state in (("missing", "does not exist"), ("a_file", "is not a folder")):
             minimal_config_dict["input"]["data_dir"] = data_dir
-            path = tmp_path / "config.yaml"
-            path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+            path = _write(tmp_path, minimal_config_dict)
             assert main(["--config", str(path), "--dry-run"]) == 1
             assert (
                 f"input.data_dir {state}: {data_dir} ({tmp_path / data_dir}; a relative path "
@@ -318,8 +318,7 @@ class TestMainConfigErrors:
         edit(minimal_config_dict)
         minimal_config_dict["input"]["data_dir"] = str(tmp_path / "data")
         minimal_config_dict["output"]["bids_root"] = str(tmp_path / "out")
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path)]) == 1
         assert f"Configuration error in {path}: " in caplog.text
         assert message in caplog.text
@@ -412,8 +411,6 @@ class TestSettingsKeysMustBeDeclared:
     def test_a_custom_check_without_settings_keys_declares_none(
         self, minimal_config_dict, monkeypatch, declared
     ):
-        from resxr.validation import check_registry
-
         class _NoKeysCheck:
             name = "_no_keys_check"
             description = "Reads no settings"
@@ -429,8 +426,6 @@ class TestSettingsKeysMustBeDeclared:
 
     @pytest.mark.parametrize("declared", [("my_check_threshold",), "my_check_threshold"])
     def test_a_custom_check_declares_its_own_key(self, minimal_config_dict, monkeypatch, declared):
-        from resxr.validation import check_registry
-
         class _MyCheck:
             name = "_my_custom_check"
             description = "Reads its own settings key"
@@ -535,8 +530,7 @@ class TestDataDirMustExist:
         minimal_config_dict["input"]["data_dir"] = str(tmp_path / "no_such_folder")
         minimal_config_dict["output"]["bids_root"] = str(tmp_path / "out")
         minimal_config_dict["session_mappings"] = mappings
-        path = tmp_path / "config.yaml"
-        path.write_text(yaml.dump(minimal_config_dict), encoding="utf-8")
+        path = _write(tmp_path, minimal_config_dict)
         assert main(["--config", str(path)]) == 1
         assert (
             f"Configuration error in {path}: input.data_dir does not exist: "

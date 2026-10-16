@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -328,8 +330,6 @@ class TestApplyQualityMasking:
 
     def test_missing_timeSinceStartup_returns_unmasked_data_and_logs_error(self, caplog):
         """If timeSinceStartup is absent, masking logs an error and returns data unchanged."""
-        import logging
-
         stream = TrackingStream(
             system=TrackingSystem.HEAD,
             data=_head_df(50).drop(columns=["timeSinceStartup"]),

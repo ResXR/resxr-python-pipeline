@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import shutil
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -160,8 +164,6 @@ class TestSessionMetadataDepartures:
 
     @staticmethod
     def _load(tmp_path, data, caplog):
-        import logging
-
         path = tmp_path / "x_SessionMetadata.json"
         path.write_text(json.dumps(data), encoding="utf-8")
         with caplog.at_level(logging.WARNING, logger="resxr"):
@@ -354,8 +356,6 @@ class TestLoadSession:
         Custom tables are optional; a session without the CustomTables folder
         must not emit an ERROR-level log (it pollutes logs for normal sessions).
         """
-        import logging
-
         config = self._input_config(tmp_path)
         with caplog.at_level(logging.DEBUG, logger="resxr.io.readers"):
             load_session(tmp_session_dir, config)
@@ -414,8 +414,6 @@ class TestLoadSession:
         """Session directory without continuous data raises MissingDataError."""
         session_dir = tmp_path / "session_no_continuous"
         session_dir.mkdir()
-        import shutil
-
         shutil.copy(tmp_metadata_json, session_dir / "session_metadata.json")
         config = self._input_config(tmp_path)
         with pytest.raises(MissingDataError, match="continuous") as error:
@@ -655,8 +653,6 @@ class TestLoadSessionCustomTableLogging:
         return d
 
     def test_row_count_mismatch_logs_warning(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -667,8 +663,6 @@ class TestLoadSessionCustomTableLogging:
         assert "row_count" in caplog.text
 
     def test_declared_class_without_csv_logs_warning(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -682,8 +676,6 @@ class TestLoadSessionCustomTableLogging:
         assert "no matching CSV" in caplog.text
 
     def test_consistent_schema_no_warning(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -695,8 +687,6 @@ class TestLoadSessionCustomTableLogging:
         assert "no matching CSV" not in caplog.text
 
     def test_multiple_custom_tables_json_prefers_exact_and_warns(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -719,10 +709,6 @@ class TestLoadSessionCustomTableLogging:
 class TestClockDepartures:
     @staticmethod
     def _load(tmp_path, clock, caplog):
-        import logging
-
-        import numpy as np
-
         path = tmp_path / "x_ContinuousData.csv"
         n = len(clock)
         pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": np.zeros(n)}).to_csv(
@@ -733,15 +719,11 @@ class TestClockDepartures:
         return path, df
 
     def test_valid_clock_with_leading_and_trailing_zeros_is_silent(self, tmp_path, caplog):
-        import numpy as np
-
         clock = np.r_[0.0, 0.0, 1.0 + np.arange(50) / 72.0, 0.0]
         self._load(tmp_path, clock, caplog)
         assert caplog.records == []
 
     def test_milliseconds_are_reported_and_not_converted(self, tmp_path, caplog):
-        import numpy as np
-
         clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
         path, df = self._load(tmp_path, clock, caplog)
         assert [r.getMessage() for r in caplog.records] == [
@@ -753,8 +735,6 @@ class TestClockDepartures:
         assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
 
     def test_backward_steps_are_counted_and_rows_kept_in_order(self, tmp_path, caplog):
-        import numpy as np
-
         clock = 1.0 + np.arange(50) / 72.0
         clock[10:20] = clock[10:20][::-1]
         path, df = self._load(tmp_path, clock, caplog)
@@ -762,8 +742,6 @@ class TestClockDepartures:
         assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
 
     def test_empty_and_infinite_clock_cells_are_counted(self, tmp_path, caplog):
-        import numpy as np
-
         clock = 1.0 + np.arange(50) / 72.0
         clock[5:8] = np.nan
         clock[30] = np.inf
@@ -774,8 +752,6 @@ class TestClockDepartures:
         ]
 
     def test_zero_values_between_valid_values_are_counted(self, tmp_path, caplog):
-        import numpy as np
-
         clock = 1.0 + np.arange(50) / 72.0
         clock[20:30] = 0.0
         clock = np.r_[0.0, 0.0, clock, 0.0]  # leading and trailing zeros are not counted
@@ -788,8 +764,6 @@ class TestClockDepartures:
 
     @staticmethod
     def _gap_lines(tmp_path, clock, caplog, loader=load_continuous_data, head_rate=None):
-        import logging
-
         path = tmp_path / "x_ContinuousData.csv"
         pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": 0.0}).to_csv(path, index=False)
         with caplog.at_level(logging.INFO, logger="resxr"):
@@ -801,10 +775,6 @@ class TestClockDepartures:
     def test_gaps_are_reported_at_info_against_the_expected_head_interval(
         self, tmp_path, caplog, loader
     ):
-        import logging
-
-        import numpy as np
-
         clock = 1.0 + np.arange(50) / 100.0  # rows every 10 ms
         clock[11:] += 0.3  # a 0.31 s step after row 10
         clock[31:] += 0.5  # a 0.51 s step after row 30, at 1.0 + 0.30 + 0.3 = 1.60
@@ -820,8 +790,6 @@ class TestClockDepartures:
         assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
     def test_without_a_head_rate_the_reference_is_the_median_step(self, tmp_path, caplog):
-        import numpy as np
-
         clock = 1.0 + np.arange(50) / 72.0  # median step 1/72 s = 0.0139 s
         clock[11:] += 0.3
         clock[31:] += 0.5  # at 1.0 + 30/72 + 0.3 = 1.72
@@ -833,16 +801,12 @@ class TestClockDepartures:
         )
 
     def test_rows_in_per_frame_bursts_are_not_gaps(self, tmp_path, caplog):
-        import numpy as np
-
         frames = 1.0 + np.arange(40) / 72.0  # three rows per frame, 1 ms apart
         clock = np.sort(np.r_[frames, frames + 0.001, frames + 0.002])
         _, lines = self._gap_lines(tmp_path, clock, caplog, head_rate=72.0)
         assert lines == []  # the median step (1 ms) would have made 39 "gaps"
 
     def test_a_millisecond_clock_has_no_gap_line(self, tmp_path, caplog):
-        import numpy as np
-
         clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
         clock[25:] += 1000.0  # a 1 s gap, which would read as 1000 s
         _, lines = self._gap_lines(tmp_path, clock, caplog, head_rate=72.0)
@@ -850,10 +814,6 @@ class TestClockDepartures:
         assert "looks like milliseconds" in caplog.text
 
     def test_a_regular_clock_has_no_gap_line(self, tmp_path, caplog):
-        import logging
-
-        import numpy as np
-
         clock = 1.0 + np.arange(50) / 72.0
         clock[25:] += 0.5 / 72.0  # one step 1.5 times the median is not a gap
         path = tmp_path / "x_ContinuousData.csv"
@@ -900,8 +860,6 @@ class TestOptionalInputsAreReported:
 
     @staticmethod
     def _load(session_dir, config, caplog):
-        import logging
-
         with caplog.at_level(logging.INFO, logger="resxr"):
             return load_session(session_dir, config)
 
@@ -938,9 +896,6 @@ class TestOptionalInputsAreReported:
         ) in caplog.text
 
     def test_several_matching_files_name_the_one_used(self, tmp_session_dir, tmp_path, caplog):
-        import os
-        import shutil
-
         newer = tmp_session_dir / "test_b_EventsData.csv"
         shutil.copy(tmp_session_dir / "test_EventsData.csv", newer)
         os.utime(newer, (2_000_000_000, 2_000_000_000))
