@@ -771,6 +771,24 @@ class TestClockDepartures:
         ]
         assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
 
+    def test_a_clock_with_one_valid_value_is_warned(self, tmp_path, caplog):
+        clock = np.zeros(40)
+        clock[25] = 3.5
+        path, df = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: only 1 of 40 rows has a timeSinceStartup value that is finite and nonzero; "
+            "the global latency of the other rows is n/a, and the clock's steps and gaps cannot "
+            "be checked"
+        ]
+        assert df["timestamp"].tolist() == clock.tolist()
+
+    @pytest.mark.parametrize("clock", [[0.0, 0.0, 0.0], [3.5]], ids=["no_valid_value", "one_row"])
+    def test_no_valid_value_or_a_single_row_is_left_to_the_session_check(
+        self, tmp_path, caplog, clock
+    ):
+        self._load(tmp_path, np.array(clock), caplog)
+        assert caplog.records == []  # the session is skipped later, with an error
+
     @staticmethod
     def _gap_lines(tmp_path, clock, caplog, loader=load_continuous_data, head_rate=None):
         path = tmp_path / "x_ContinuousData.csv"

@@ -71,6 +71,12 @@ def check_clock(values: pd.Series, source: Path, head_rate: float | None = None)
         )
     has_time = np.isfinite(t) & (t != 0)
     valid = t[has_time]
+    if valid.size == 1 and t.size > 1:
+        logger.warning(
+            f"{source}: only 1 of {t.size} rows has a {GLOBAL_CLOCK_COLUMN} value that is finite "
+            "and nonzero; the global latency of the other rows is n/a, and the clock's steps "
+            "and gaps cannot be checked"
+        )
     if valid.size < 2:
         return
     inside = np.flatnonzero(has_time)
