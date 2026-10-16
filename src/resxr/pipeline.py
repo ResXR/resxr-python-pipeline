@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,6 +43,8 @@ from .io.readers import discover_sessions, load_session
 from .io.splitter import split_continuous_data, systems_off_on_purpose
 from .io.writers import (
     copy_sourcedata,
+    remove_path,
+    will_copy_sourcedata,
     write_bids_events,
     write_channels_tsv,
     write_json,
@@ -228,71 +229,125 @@ def _report_path(session: Session, config: PipelineConfig, bids: BIDSLayout) -> 
 
 
 class _SessionOutputs:
-    """The output one session writes, so that a skipped session leaves none behind.
+    """The output one session writes, so that a skipped session leaves none of its files.
 
-    ``start`` records, before the session writes anything, which of its output
-    targets already exist: its sourcedata, raw and derivative session folders
-    (``ses-*``, with the ``sub-*`` folders above them) and its report file.
-    Each write step marks its target with ``writing``. ``remove`` deletes the
-    marked targets that the session created, then the ``sub-*`` folders that
-    it created and left empty; a marked target that existed before is kept,
-    with a warning. Nothing outside the BIDS root and the report directory is
-    deleted, nor any path that is, holds or lies inside a session's input
-    folder, nor the data directory or a folder above it.
+    ``start`` records, before the session is read, which of its output folders
+    already exist: its sourcedata, raw and derivative session folders
+    (``ses-*``) and the folders above them up to the BIDS root (``sub-*``,
+    ``sourcedata``, ``derivatives``, ``derivatives/resxr``); ``add_report``
+    does the same for the report file once the session_id is known. Each write
+    step marks its target with ``writing``. ``remove`` deletes the marked
+    targets that the session created, then the folders above them that it
+    created and left empty, and warns once about each target that existed
+    before the session started (a rerun into an existing output), whether the
+    session wrote into it or not. Nothing outside the BIDS root and the report
+    directory is deleted, nor any path that is, holds or lies inside a
+    session's input folder, nor the data directory or a folder above it.
+    *written* is shared by the sessions of one run: target -> the session that
+    wrote it, so that a report path two sessions share is reported.
     """
 
-    def __init__(self, config: PipelineConfig, bids: BIDSLayout, source_dirs: list[Path]):
+    def __init__(
+        self,
+        config: PipelineConfig,
+        bids: BIDSLayout,
+        source_dirs: list[Path],
+        written: dict[Path, str] | None = None,
+    ):
         self.bids_root = bids.bids_root
         self.roots = [bids.bids_root.resolve()]
         if config.report.output_dir is not None:
             self.roots.append(Path(config.report.output_dir).resolve())
         self.data_dir = Path(config.input.data_dir).resolve()
         self.source_dirs = [Path(d).resolve() for d in source_dirs]
-        self.existed: dict[Path, bool] = {}  # target or its sub-* folder -> existed at start
+        self.written = {} if written is None else written
+        self.name = ""  # the session's source_dir as mapped
+        self.existed: dict[Path, bool] = {}  # target or a folder above it -> existed at start
         self.targets: list[Path] = []
         self.marked: list[Path] = []
+        self.report: Path | None = None
 
-    def start(self, session: Session, config: PipelineConfig, bids: BIDSLayout) -> None:
-        """Record which output targets of the session exist before it writes any."""
-        folders = [
-            bids.sourcedata_session_dir(session),
-            bids.get_session_dir(session),
-            bids.get_session_dir(session, derivative=True),
+    def start(self, mapping: SessionMapping, bids: BIDSLayout) -> None:
+        """Record which output folders of the session exist before it is read."""
+        self.name = mapping.source_dir
+        self.targets = [
+            bids.sourcedata_session_dir(mapping),
+            bids.get_session_dir(mapping),
+            bids.get_session_dir(mapping, derivative=True),
         ]
-        report = [_report_path(session, config, bids)] if config.report.enabled else []
-        self.targets = folders + report
         for target in self.targets:
             self.existed[target] = target.exists()
-        for folder in folders:
-            self.existed.setdefault(folder.parent, folder.parent.exists())
+            for folder in target.parents:
+                if folder == self.bids_root:
+                    break
+                self.existed.setdefault(folder, folder.exists())
+
+    def add_report(self, path: Path) -> None:
+        """Record whether the session's report file exists before it is written."""
+        self.report = path
+        self.targets.append(path)
+        self.existed[path] = path.exists()
 
     def writing(self, target: Path) -> None:
         """Mark a target that the session is about to write."""
-        if target in self.existed and target not in self.marked:
-            self.marked.append(target)
+        if target not in self.existed or target in self.marked:
+            return
+        other = self.written.get(target)
+        if target == self.report and other is not None and other != self.name:
+            logger.warning(
+                f"The report {target} was written earlier in this run for {other} and is "
+                f"overwritten now by the report of {self.name}: the two sessions have the "
+                "same session_id, which names the report in report.output_dir"
+            )
+        self.written[target] = self.name
+        self.marked.append(target)
 
-    def remove(self, source_dir: str) -> None:
-        """Delete what the skipped session created; warn about targets that existed."""
+    def remove(self, how: str = "skipped") -> None:
+        """Delete what the session created; warn about each target that existed.
+
+        *how* says why the session's output goes: "skipped" or "interrupted".
+        A filesystem error is a warning naming the path, never an exception.
+        """
         removed: list[Path] = []
         kept: list[Path] = []
-        for target in self.marked:
-            if self.existed[target]:
-                if not any(folder in target.parents for folder in kept):  # one line per folder
-                    logger.warning(
-                        f"{target} existed before this run and may now hold partial files from "
-                        f"the skipped session {source_dir}; remove it or rerun."
-                    )
-                kept.append(target)
-            elif target.exists() and self._remove(target):
-                removed.append(target)
+        for target in self.targets:
+            try:
+                if self.existed[target]:
+                    self._warn_kept(target, kept, how)
+                elif target in self.marked and target.exists() and self._remove(target, how):
+                    removed.append(target)
+            except OSError as e:
+                logger.warning(f"Could not check {target} of the {how} session {self.name}: {e}")
         above = [p for p, existed in self.existed.items() if not existed and p not in self.targets]
         for folder in sorted(above, key=lambda p: len(p.parts), reverse=True):
-            if folder.is_dir() and not any(folder.iterdir()) and self._remove(folder):
-                removed.append(folder)
+            try:
+                if folder.is_dir() and not any(folder.iterdir()) and self._remove(folder, how):
+                    removed.append(folder)
+            except OSError as e:
+                logger.warning(f"Could not check {folder} of the {how} session {self.name}: {e}")
         shown = [p for p in removed if not any(q in p.parents for q in removed)]
         if shown:
             names = ", ".join(sorted(self._shown(p) for p in shown))
-            logger.info(f"Removed the output written for skipped session {source_dir}: {names}")
+            logger.info(f"Removed the output written for {how} session {self.name}: {names}")
+
+    def _warn_kept(self, target: Path, kept: list[Path], how: str) -> None:
+        """One warning per kept target (none for a file inside a kept folder)."""
+        marked = target in self.marked
+        if not marked and self.written.get(target, self.name) != self.name:
+            return  # another session of this run wrote it
+        if not any(folder in target.parents for folder in kept):
+            if marked:
+                logger.warning(
+                    f"{target} existed before this session started and may now hold partial "
+                    f"files from the {how} session {self.name}; remove it or fix the session "
+                    "and rerun."
+                )
+            else:
+                logger.warning(
+                    f"{target} holds output of an earlier run for a session that was {how} now "
+                    f"({self.name}); remove it or fix the session and rerun."
+                )
+        kept.append(target)
 
     def _deletable(self, path: Path) -> bool:
         p = path.resolve()
@@ -304,17 +359,14 @@ class _SessionOutputs:
         )
         return inside_output and not holds_input
 
-    def _remove(self, path: Path) -> bool:
+    def _remove(self, path: Path, how: str) -> bool:
         if not self._deletable(path):
             logger.warning(f"Not removed: {path} is outside the output folders or holds input data")
             return False
         try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
-                path.unlink()
+            remove_path(path)
         except OSError as e:
-            logger.warning(f"Could not remove {path} of a skipped session: {e}")
+            logger.warning(f"Could not remove {path} of the {how} session {self.name}: {e}")
             return False
         return True
 
@@ -333,9 +385,10 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
     run continues with the others and ends with a summary of every session.
     An unexpected error (not a ResXRError) is handled the same way, with its
     traceback at DEBUG; KeyboardInterrupt still stops the run. The output that
-    a skipped session had written (sourcedata copy, raw and derivative session
-    files, report) is removed; folders that existed before are kept, with a
-    warning.
+    a skipped or interrupted session had written (sourcedata copy, raw and
+    derivative session files, report) is removed, with the folders it created
+    and left empty; its folders and report that existed before it started are
+    kept, with a warning.
 
     Parameters
     ----------
@@ -386,8 +439,9 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
     processed_subjects = []
     resxr_logger = logging.getLogger("resxr")
     source_dirs = [_source_dir(mapping, config) for mapping in mappings]
+    written: dict[Path, str] = {}  # output target -> the session that wrote it in this run
     for mapping in mappings:
-        outputs = _SessionOutputs(config, bids, source_dirs)
+        outputs = _SessionOutputs(config, bids, source_dirs, written)
         outcome = SessionOutcome(
             source_dir=mapping.source_dir,
             subject_id=mapping.subject_id,
@@ -416,6 +470,9 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
         except Exception as e:  # not foreseen by the code: skip this session only
             outcome.reason = f"unexpected error: {type(e).__name__}: {e}"
             unexpected = e
+        except KeyboardInterrupt:  # stop the run, without this session's partial output
+            outputs.remove("interrupted")
+            raise
         finally:
             resxr_logger.removeHandler(counter)
         outcome.warnings, outcome.errors = counter.warnings, counter.errors
@@ -423,7 +480,7 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
             logger.error(f"Failed to process {mapping.source_dir}: {outcome.reason}")
             if unexpected is not None:
                 logger.debug("Traceback of the unexpected error:", exc_info=unexpected)
-            outputs.remove(mapping.source_dir)
+            outputs.remove()
         result.sessions.append(outcome)
 
     # Write dataset-level files only if at least one session succeeded
@@ -516,7 +573,8 @@ def process_session_from_mapping(
         Which tracking systems are enabled
     outputs : _SessionOutputs, optional
         Records what the session writes, so that ``run`` can remove it when the
-        session is skipped
+        session is skipped. Without it (a direct call), the session tracks its
+        own output and removes it before re-raising an error.
 
     Returns
     -------
@@ -528,9 +586,28 @@ def process_session_from_mapping(
     ResXRError
         When the session cannot be processed; the caller logs it and skips it.
     """
-    # Resolve session directory
     source_dir = _source_dir(mapping, config)
+    own_outputs = outputs is None
+    if outputs is None:  # direct callers: track the session on its own
+        outputs = _SessionOutputs(config, bids, [source_dir])
+    outputs.start(mapping, bids)
+    try:
+        return _process_session(mapping, config, bids, enabled_systems, outputs, source_dir)
+    except Exception:
+        if own_outputs:
+            outputs.remove()
+        raise
 
+
+def _process_session(
+    mapping: SessionMapping,
+    config: PipelineConfig,
+    bids: BIDSLayout,
+    enabled_systems: dict[str, bool],
+    outputs: _SessionOutputs,
+    source_dir: Path,
+) -> Session:
+    """Load, check and write one session, marking each output target before writing it."""
     logger.info(f"Processing session: {source_dir}")
 
     # Load session
@@ -539,17 +616,14 @@ def process_session_from_mapping(
     )
     session.subject_id = mapping.subject_id
     session.session_label = mapping.session_label
-    if outputs is None:  # direct callers: track the session on its own
-        outputs = _SessionOutputs(config, bids, [source_dir])
-    outputs.start(session, config, bids)
+    if config.report.enabled:
+        outputs.add_report(_report_path(session, config, bids))
 
     # Copy the raw session verbatim into sourcedata/ before any transformation.
-    outputs.writing(bids.sourcedata_session_dir(session))
-    copy_sourcedata(
-        Path(source_dir),
-        bids.sourcedata_session_dir(session),
-        overwrite=config.output.overwrite,
-    )
+    sourcedata = bids.sourcedata_session_dir(session)
+    if will_copy_sourcedata(sourcedata, config.output.overwrite):
+        outputs.writing(sourcedata)
+    copy_sourcedata(Path(source_dir), sourcedata, overwrite=config.output.overwrite)
 
     # Split into tracking streams
     session.streams = split_continuous_data(

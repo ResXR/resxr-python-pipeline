@@ -1344,8 +1344,8 @@ def test_a_session_skipped_at_the_split_leaves_no_output(tmp_path, minimal_confi
     assert _session_outputs(bids_root, "sub-01") == []
     (removed,) = [r for r in caplog.records if r.getMessage().startswith("Removed the output")]
     assert removed.levelname == "INFO"
-    assert removed.getMessage() == (
-        f"Removed the output written for skipped session sess_a: {Path('sourcedata', 'sub-01')}"
+    assert removed.getMessage() == (  # sourcedata/ was created by sess_a alone (M10)
+        "Removed the output written for skipped session sess_a: sourcedata"
     )
     assert _files(bids_root / "sourcedata" / "sub-02" / "ses-01") == _files(data_dir / "sess_b")
     assert list((bids_root / "sub-02" / "ses-01" / "motion").glob("*_motion.tsv"))
@@ -1402,7 +1402,7 @@ def test_a_late_failure_removes_every_file_of_that_session(
     assert _session_outputs(bids_root, "sub-01") == []
     reports = tmp_path / report_dir if report_dir else bids_root / "sub-02" / "ses-01"
     assert [p.name for p in reports.rglob("*_report.html")] == ["B_report.html"]
-    shown = [str(Path("derivatives", "resxr", "sub-01")), str(Path("sourcedata", "sub-01"))]
+    shown = ["derivatives", "sourcedata"]  # created by session A alone, so removed (M10)
     shown += [str(tmp_path / report_dir / "A_report.html")] if report_dir else []
     shown.append("sub-01")
     assert (
@@ -1436,12 +1436,19 @@ def test_a_session_folder_that_existed_before_is_kept_with_a_warning(
     assert after[sourcedata_tree].keys() == before[sourcedata_tree].keys()
     assert after[sourcedata_tree] != before[sourcedata_tree]
     sourcedata = bids_root / "sourcedata" / "sub-01" / "ses-01"
-    (warning,) = [r for r in caplog.records if "existed before this run" in r.getMessage()]
-    assert warning.levelname == "WARNING"
-    assert warning.getMessage() == (
-        f"{sourcedata} existed before this run and may now hold partial files from the "
-        "skipped session sess_a; remove it or rerun."
-    )
+    kept = [r for r in caplog.records if " rerun." in r.getMessage()]
+    assert [r.levelname for r in kept] == ["WARNING"] * 3
+    assert [r.getMessage() for r in kept] == [
+        f"{sourcedata} existed before this session started and may now hold partial files "
+        "from the skipped session sess_a; remove it or fix the session and rerun.",
+    ] + [  # not written in this run, but stale (M16)
+        f"{folder} holds output of an earlier run for a session that was skipped now "
+        "(sess_a); remove it or fix the session and rerun."
+        for folder in (
+            bids_root / "sub-01" / "ses-01",
+            bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01",
+        )
+    ]
     assert "Removed the output" not in caplog.text
 
 
@@ -1456,7 +1463,7 @@ def test_a_session_skipped_while_loading_writes_and_removes_nothing(
     assert [s.processed for s in result.sessions] == [False, True]
     assert _session_outputs(bids_root, "sub-01") == []
     assert "Removed the output" not in caplog.text
-    assert "existed before this run" not in caplog.text
+    assert " rerun." not in caplog.text
 
 
 def test_removal_never_reaches_the_input_or_outside_the_output(tmp_path, minimal_config_dict):
@@ -1508,7 +1515,8 @@ def test_a_late_failure_in_an_existing_output_warns_once_per_folder(
     warned = [
         r.getMessage().split(" existed before")[0]
         for r in caplog.records
-        if "existed before this run" in r.getMessage()
+        if "existed before this session started and may now hold partial files from the "
+        "skipped session sess_a; remove it or fix the session and rerun." in r.getMessage()
     ]
     assert warned == [  # the report inside sub-01/ses-01 gets no line of its own
         str(bids_root / "sourcedata" / "sub-01" / "ses-01"),
@@ -1592,3 +1600,228 @@ def test_zero_clock_values_between_valid_values_are_warned_and_written_as_n_a(
     hands = _motion(bids_root, "Hands")
     assert hands["latency"].isna().tolist() == [i in (20, 21) for i in range(30)]
     assert (hands["latency"].dropna() >= 0).all()
+
+
+# ── Skipped-session cleanup, follow-ups of the review (16 Oct) ───────
+
+
+def _edit_config(cfg: Path, edit) -> None:
+    data = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+    edit(data)
+    cfg.write_text(yaml.dump(data), encoding="utf-8")
+
+
+def test_a_rerun_that_keeps_the_sourcedata_copy_names_every_stale_folder(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_config(cfg, lambda c: c["output"].update(overwrite=False))
+    bids_root = tmp_path / "bids_out"
+    run(str(cfg))  # a complete first run
+    sourcedata = bids_root / "sourcedata" / "sub-01" / "ses-01"
+    copied = _files(sourcedata)
+    _zero_hands_clock(data_dir / "sess_a")  # now skipped at the split
+    caplog.clear()
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert _files(sourcedata) == copied  # the copy was not redone (overwrite: false)
+    assert "may now hold partial files" not in caplog.text
+    stale = [r for r in caplog.records if "holds output of an earlier run" in r.getMessage()]
+    assert [r.levelname for r in stale] == ["WARNING"] * 3
+    assert [r.getMessage() for r in stale] == [
+        f"{folder} holds output of an earlier run for a session that was skipped now (sess_a); "
+        "remove it or fix the session and rerun."
+        for folder in (
+            sourcedata,
+            bids_root / "sub-01" / "ses-01",
+            bids_root / "derivatives" / "resxr" / "sub-01" / "ses-01",
+        )
+    ]
+    assert "Removed the output" not in caplog.text
+
+
+def test_a_rerun_with_a_session_now_unreadable_names_its_stale_folders(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    bids_root = tmp_path / "bids_out"
+    run(str(cfg))
+    (data_dir / "sess_a" / "session_metadata.json").unlink()  # skipped while loading now
+    caplog.clear()
+    run(str(cfg))
+    stale = [r.getMessage() for r in caplog.records if "earlier run" in r.getMessage()]
+    assert len(stale) == 3
+    assert stale[0].startswith(f"{bids_root / 'sourcedata' / 'sub-01' / 'ses-01'} holds output")
+
+
+def test_every_session_skipped_leaves_no_empty_output_folders(
+    tmp_path, minimal_config_dict, monkeypatch
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_config(cfg, lambda c: c["report"].update(enabled=True))
+    import resxr.pipeline as pipeline_module
+
+    def fail_every_report(self, session, output_path, *args, **kwargs):
+        output_path.write_text("partial", encoding="utf-8")
+        raise TypeError("must be real number, not str")
+
+    monkeypatch.setattr(pipeline_module.ReportGenerator, "generate", fail_every_report)
+    result = run(str(cfg))
+    assert result.exit_code == 1
+    assert list((tmp_path / "bids_out").iterdir()) == []  # no sourcedata/ or derivatives/
+
+
+def test_output_folders_that_existed_before_the_run_are_kept_when_empty(
+    tmp_path, minimal_config_dict
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    for name in ("sess_a", "sess_b"):
+        _zero_hands_clock(data_dir / name)
+    bids_root = tmp_path / "bids_out"
+    (bids_root / "sourcedata").mkdir(parents=True)
+    (bids_root / "derivatives" / "resxr").mkdir(parents=True)
+    run(str(cfg))
+    assert sorted(p.relative_to(bids_root).as_posix() for p in bids_root.rglob("*")) == [
+        "derivatives",
+        "derivatives/resxr",
+        "sourcedata",
+    ]
+
+
+def test_a_filesystem_error_while_removing_is_a_warning_and_the_run_continues(
+    tmp_path, minimal_config_dict, caplog, monkeypatch
+):
+    data_dir = tmp_path / "sessions"
+    _write_clocked_session_dir(data_dir, "sess_a", session_id="A")
+    _write_clocked_session_dir(data_dir, "sess_b", session_id="B")
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    bids_root = tmp_path / "bids_out"
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=data_dir,
+        bids_root=bids_root,
+        session_mappings=[
+            {"source_dir": "sess_a", "subject_id": "01", "session_label": "01"},
+            {"source_dir": "sess_b", "subject_id": "02", "session_label": "01"},
+        ],
+        report=True,
+    )
+    _fail_report_of_session_a(monkeypatch)
+    unreadable = bids_root / "sub-01"
+    iterdir = Path.iterdir
+
+    def iterdir_or_fail(self):
+        if self == unreadable:
+            raise PermissionError(13, "Access is denied", str(self))
+        return iterdir(self)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir_or_fail)
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    (warning,) = [r for r in caplog.records if r.getMessage().startswith("Could not check")]
+    assert warning.levelname == "WARNING"
+    error = PermissionError(13, "Access is denied", str(unreadable))
+    assert warning.getMessage() == (
+        f"Could not check {unreadable} of the skipped session sess_a: {error}"
+    )
+    assert "Run summary: 2 session(s) found, 1 processed, 1 skipped." in caplog.text
+    assert not (bids_root / "sub-01" / "ses-01").exists()  # the rest was removed
+
+
+def _make_read_only(folder: Path) -> None:
+    import stat
+
+    for path in folder.rglob("*"):
+        if path.is_file():
+            path.chmod(stat.S_IREAD)
+
+
+def test_read_only_input_files_are_removed_from_sourcedata_of_a_skipped_session(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _zero_hands_clock(data_dir / "sess_a")
+    _make_read_only(data_dir / "sess_a")  # copytree copies the read-only attribute
+    bids_root = tmp_path / "bids_out"
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    assert "Could not remove" not in caplog.text
+    assert _session_outputs(bids_root, "sub-01") == []
+
+
+def test_a_rerun_with_overwrite_replaces_a_read_only_sourcedata_copy(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _make_read_only(data_dir / "sess_a")
+    assert run(str(cfg)).exit_code == 0  # output.overwrite is true in this config
+    caplog.clear()
+    result = run(str(cfg))
+    assert result.exit_code == 0
+    assert "Access is denied" not in caplog.text and "Permission denied" not in caplog.text
+    sourcedata = tmp_path / "bids_out" / "sourcedata" / "sub-01" / "ses-01"
+    assert _files(sourcedata) == _files(data_dir / "sess_a")
+
+
+def test_a_direct_call_removes_the_output_of_a_failing_session(tmp_path, minimal_config_dict):
+    from resxr.bids.layout import BIDSLayout
+    from resxr.core.config import PipelineConfig, SessionMapping
+    from resxr.core.exceptions import DataLoadError
+    from resxr.pipeline import process_session_from_mapping
+
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _zero_hands_clock(data_dir / "sess_a")
+    config = PipelineConfig.from_yaml(cfg)
+    bids = BIDSLayout(config.output.bids_root, config.output.task_name)
+    mapping = SessionMapping(source_dir="sess_a", subject_id="01", session_label="01")
+    with pytest.raises(DataLoadError, match="Stream Hands: no non-zero timestamp found"):
+        process_session_from_mapping(mapping, config, bids, {})
+    assert _session_outputs(tmp_path / "bids_out", "sub-01") == []
+
+
+def test_keyboard_interrupt_removes_the_output_of_the_interrupted_session(
+    tmp_path, minimal_config_dict, caplog, monkeypatch
+):
+    import resxr.pipeline as pipeline_module
+
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_config(cfg, lambda c: c["report"].update(enabled=True))
+
+    def interrupt(self, session, output_path, *args, **kwargs):
+        output_path.write_text("partial", encoding="utf-8")
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(pipeline_module.ReportGenerator, "generate", interrupt)
+    with caplog.at_level(logging.INFO, logger="resxr"), pytest.raises(KeyboardInterrupt):
+        run(str(cfg))
+    assert list((tmp_path / "bids_out").iterdir()) == []
+    assert (
+        "Removed the output written for interrupted session sess_a: derivatives, sourcedata, sub-01"
+    ) in caplog.text
+
+
+def test_two_sessions_sharing_a_report_path_are_named(tmp_path, minimal_config_dict, caplog):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    metadata_path = data_dir / "sess_b" / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata_path.write_text(json.dumps({**metadata, "session_id": "A"}), encoding="utf-8")
+    reports = tmp_path / "reports"
+    _edit_config(cfg, lambda c: c["report"].update(enabled=True, output_dir=str(reports)))
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert result.exit_code == 0
+    (warning,) = [r for r in caplog.records if "written earlier in this run" in r.getMessage()]
+    assert warning.levelname == "WARNING"
+    assert warning.getMessage() == (
+        f"The report {reports / 'A_report.html'} was written earlier in this run for sess_a and "
+        "is overwritten now by the report of sess_b: the two sessions have the same "
+        "session_id, which names the report in report.output_dir"
+    )
+    assert [p.name for p in reports.iterdir()] == ["A_report.html"]
