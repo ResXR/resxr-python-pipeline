@@ -1872,28 +1872,37 @@ def test_two_sessions_sharing_a_report_path_are_named(tmp_path, minimal_config_d
     assert [p.name for p in reports.iterdir()] == ["A_report.html"]
 
 
-def test_a_session_read_from_its_own_sourcedata_copy_is_processed(
-    tmp_path, minimal_config_dict, caplog
-):
+def test_sessions_read_from_their_own_sourcedata_copies(tmp_path, minimal_config_dict, caplog):
     data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
     bids_root = tmp_path / "bids_out"
-    run(str(cfg))  # first run: sourcedata/sub-01/ses-01 holds sess_a's copy
-    copy = bids_root / "sourcedata" / "sub-01" / "ses-01"
-    before = _files(copy)
+    run(str(cfg))  # first run: sourcedata/sub-0N/ses-01 hold the copies of sess_a and sess_b
+    copies = [bids_root / "sourcedata" / sub / "ses-01" for sub in ("sub-01", "sub-02")]
+    _zero_hands_clock(copies[1])  # sub-02 is now skipped at the split
+    before = [_files(copy) for copy in copies]
 
     def reprocess_from_sourcedata(c):  # output.overwrite is true in this config
         c["input"]["data_dir"] = str(bids_root / "sourcedata")
         c["session_mappings"] = [
-            {"source_dir": "sub-01/ses-01", "subject_id": "01", "session_label": "01"}
+            {"source_dir": f"sub-{n}/ses-01", "subject_id": n, "session_label": "01"}
+            for n in ("01", "02")
         ]
 
     _edit_config(cfg, reprocess_from_sourcedata)
     caplog.clear()
     with caplog.at_level(logging.INFO, logger="resxr"):
         result = run(str(cfg))
-    assert result.exit_code == 0
-    assert f"sourcedata is the input folder; nothing copied ({copy})" in caplog.text
-    assert _files(copy) == before
+    assert [s.processed for s in result.sessions] == [True, False]
+    assert f"sourcedata is the input folder; nothing copied ({copies[0]})" in caplog.text
+    assert [_files(copy) for copy in copies] == before
+    stale = [r.getMessage() for r in caplog.records if "earlier run" in r.getMessage()]
+    assert stale == [  # none for the skipped session's input folder, sourcedata/sub-02/ses-01
+        f"{folder} holds output of an earlier run for a session that was skipped now "
+        "(sub-02/ses-01); remove it or fix the session and rerun."
+        for folder in (
+            bids_root / "sub-02" / "ses-01",
+            bids_root / "derivatives" / "resxr" / "sub-02" / "ses-01",
+        )
+    ]
 
 
 @pytest.mark.parametrize(

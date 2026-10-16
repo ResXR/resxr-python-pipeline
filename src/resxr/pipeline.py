@@ -324,9 +324,10 @@ class _SessionOutputs:
     targets that the session created, then the folders above them that it
     created and left empty, and warns once about each target that existed
     before the session started (a rerun into an existing output), whether the
-    session wrote into it or not. Nothing outside the BIDS root and the report
-    directory is deleted, nor any path that is, holds or lies inside a
-    session's input folder, nor the data directory or a folder above it.
+    session wrote into it or not, unless it holds input. Nothing outside the
+    BIDS root and the report directory is deleted, nor any path that is, holds
+    or lies inside a session's input folder, nor the data directory or a folder
+    above it.
     *written* is shared by the sessions of one run: target -> the session that
     wrote it, so that a report path two sessions share is reported.
     """
@@ -416,6 +417,8 @@ class _SessionOutputs:
 
     def _warn_kept(self, target: Path, kept: list[Path], how: str) -> None:
         """One warning per kept target (none for a file inside a kept folder)."""
+        if not self._deletable(target):
+            return  # input data (a session read from sourcedata/), not output to remove
         marked = target in self.marked
         if not marked and self.written.get(target, self.name) != self.name:
             return  # another session of this run wrote it
