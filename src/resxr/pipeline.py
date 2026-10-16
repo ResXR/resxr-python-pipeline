@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -396,24 +398,28 @@ class _SessionOutputs:
         removed: list[Path] = []
         kept: list[Path] = []
         for target in self.targets:
-            try:
+            with self._checking(target, how):
                 if self.existed[target]:
                     self._warn_kept(target, kept, how)
                 elif target in self.marked and target.exists() and self._remove(target, how):
                     removed.append(target)
-            except OSError as e:
-                logger.warning(f"Could not check {target} of the {how} session {self.name}: {e}")
         above = [p for p, existed in self.existed.items() if not existed and p not in self.targets]
         for folder in sorted(above, key=lambda p: len(p.parts), reverse=True):
-            try:
+            with self._checking(folder, how):
                 if folder.is_dir() and not any(folder.iterdir()) and self._remove(folder, how):
                     removed.append(folder)
-            except OSError as e:
-                logger.warning(f"Could not check {folder} of the {how} session {self.name}: {e}")
         shown = [p for p in removed if not any(q in p.parents for q in removed)]
         if shown:
             names = ", ".join(sorted(self._shown(p) for p in shown))
             logger.info(f"Removed the output written for {how} session {self.name}: {names}")
+
+    @contextmanager
+    def _checking(self, path: Path, how: str) -> Iterator[None]:
+        """Turn a filesystem error while checking *path* into a warning."""
+        try:
+            yield
+        except OSError as e:
+            logger.warning(f"Could not check {path} of the {how} session {self.name}: {e}")
 
     def _warn_kept(self, target: Path, kept: list[Path], how: str) -> None:
         """One warning per kept target (none for a file inside a kept folder)."""
