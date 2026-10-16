@@ -305,7 +305,7 @@ def _add_face_file_without_clocks(session_dir: Path) -> None:
         (_text_in_main_clock, "Stream Head: non-numeric value in 'timeSinceStartup' column"),
         (_text_in_hands_clock, "Stream Hands: non-numeric value in 'timestamp' column"),
         (_keep_one_row, "Stream Head: need at least 2 rows"),
-        (_add_face_file_without_clocks, "Stream Face: missing 'timestamp' column"),
+        (_add_face_file_without_clocks, "No timestamp column found in "),
     ],
 )
 def test_untimeable_session_is_skipped_and_the_run_continues(
@@ -1849,3 +1849,63 @@ def test_a_session_read_from_its_own_sourcedata_copy_is_processed(
     assert result.exit_code == 0
     assert f"sourcedata is the input folder; nothing copied ({copy})" in caplog.text
     assert _files(copy) == before
+
+
+@pytest.mark.parametrize(
+    "face_text",
+    [
+        "timeSinceStartup;Face_Time;Eyes_Closed_L\n1.0;50.0;0.1\n1.1;50.1;0.2\n",
+        "Face_Status,Eyes_Closed_L\ntrue,0.1\ntrue,0.2\n",
+    ],
+    ids=["semicolons", "no_clock_column"],
+)
+def test_a_face_file_without_a_clock_column_names_the_expected_format(
+    tmp_path, minimal_config_dict, caplog, face_text
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_config(
+        cfg,
+        lambda c: c["preprocessing"]["alternate_time_columns"].update(Face="Face_Time"),
+    )
+    session_dir = data_dir / "sess_a"
+    metadata_path = session_dir / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata_path.write_text(json.dumps({**metadata, "face_enabled": True}), encoding="utf-8")
+    face = session_dir / "A_FaceExpressionData.csv"
+    face.write_text(face_text, encoding="utf-8")
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]  # still skipped
+    assert result.skipped[0].reason == (
+        f"No timestamp column found in {face}: the file must be comma-separated, with a header "
+        "row that includes timeSinceStartup or Face_Time"
+    )
+    assert "clock column 'Face_Time'" not in caplog.text
+    assert "missing 'timestamp' column" not in caplog.text
+
+
+def test_a_face_file_that_pandas_cannot_tokenize_names_the_expected_format(
+    tmp_path, minimal_config_dict, caplog
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    face = data_dir / "sess_a" / "A_FaceExpressionData.csv"
+    face.write_text("timeSinceStartup;Eyes_Closed_L\n1,0;0,1\n1,1;0,2;3,4,5\n", encoding="utf-8")
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        run(str(cfg))
+    (warning,) = [r for r in caplog.records if r.getMessage().startswith("Could not load face")]
+    assert warning.getMessage().startswith(f"Could not load face data: Failed to load {face}: ")
+    assert warning.getMessage().endswith(
+        ". Check that the file is comma-separated with '.' as the decimal separator, and that "
+        "every row has the header's number of fields"
+    )
+
+
+def test_a_text_fixed_delta_time_no_longer_stops_the_report(tmp_path, minimal_config_dict):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_config(cfg, lambda c: c["report"].update(enabled=True))
+    metadata_path = data_dir / "sess_a" / "session_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    metadata_path.write_text(json.dumps({**metadata, "fixedDeltaTime": "0.02"}), encoding="utf-8")
+    assert run(str(cfg)).exit_code == 0
+    report = (tmp_path / "bids_out" / "sub-01" / "ses-01" / "A_report.html").read_text("utf-8")
+    assert "<tr><th>Fixed delta time</th><td>0.0200 s</td></tr>" in report

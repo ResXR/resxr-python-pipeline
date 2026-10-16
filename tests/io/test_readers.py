@@ -228,6 +228,34 @@ class TestSessionMetadataDepartures:
             "the session's file names). Correct session_id in the metadata file."
         )
 
+    @pytest.mark.parametrize(("value", "shown"), [(False, "false"), (123, "123"), ([1], "[1]")])
+    def test_a_session_id_that_is_not_text_is_read_as_unknown(self, tmp_path, caplog, value, shown):
+        path, meta = self._load(tmp_path, {"fixedDeltaTime": 0.02, "session_id": value}, caplog)
+        assert meta.session_id == "unknown"
+        assert (
+            f"{path} has no session_id (it is {shown}, not text); using 'unknown': custom tables "
+            "are read only from a folder named 'unknown_CustomTables'"
+        ) in caplog.text
+
+    @pytest.mark.parametrize(
+        ("value", "shown"), [("0.02", '"0.02"'), (True, "true"), (None, "null")]
+    )
+    def test_a_fixed_delta_time_that_is_not_a_number_defaults_with_a_warning(
+        self, tmp_path, caplog, value, shown
+    ):
+        path, meta = self._load(tmp_path, {"session_id": "s", "fixedDeltaTime": value}, caplog)
+        assert meta.fixed_delta_time == 0.02
+        assert [r.getMessage() for r in caplog.records if "fixedDeltaTime" in r.getMessage()] == [
+            f"SessionMetadata 'fixedDeltaTime' is {shown}, not a number; defaulting to 0.02 s "
+            f"({path}; the value is shown only in the report header)"
+        ]
+
+    @pytest.mark.parametrize("value", [0.011111, 1])
+    def test_a_numeric_fixed_delta_time_is_used_without_a_message(self, tmp_path, caplog, value):
+        _, meta = self._load(tmp_path, {"session_id": "s", "fixedDeltaTime": value}, caplog)
+        assert meta.fixed_delta_time == value
+        assert "fixedDeltaTime" not in caplog.text
+
     def test_metadata_that_is_not_an_object_is_a_load_error(self, tmp_path):
         path = tmp_path / "x_SessionMetadata.json"
         path.write_text("[1, 2]", encoding="utf-8")

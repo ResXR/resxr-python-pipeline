@@ -25,12 +25,12 @@ which runs at write time.
 from __future__ import annotations
 
 from ..core.constants import GLOBAL_CLOCK_COLUMN, SYSTEM_COLUMN_PREFIXES, TrackingSystem
-from ..core.exceptions import ConfigurationError
+from ..core.exceptions import ConfigurationError, DataLoadError
 from ..core.logger import get_logger
 from ..core.session import Session, SessionMetadata, TrackingStream
 from ..utils import preview
 from .column_maps import get_columns_for_system
-from .readers import check_stream_clock
+from .readers import check_stream_clock, no_clock_column_message
 
 logger = get_logger(__name__)
 
@@ -308,6 +308,9 @@ def split_continuous_data(
     else:
         face_df = face.copy()
         clock = (alternate_time_columns or {}).get("Face")
+        if "timestamp" not in face_df.columns and not (clock and clock in face_df.columns):
+            source = face.attrs.get("path", f"the face file of session '{sid}'")
+            raise DataLoadError(no_clock_column_message(source, f" or {clock}" if clock else ""))
         if clock and clock not in face_df.columns:
             _warn_clock_column_missing(sid, "Face", clock, "face file")
         if clock and clock in face_df.columns:

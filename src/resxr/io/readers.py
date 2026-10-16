@@ -27,6 +27,19 @@ logger = get_logger(__name__)
 _CLOCK_STEP_LOOKS_LIKE_MS = 0.5
 # A timeSinceStartup step longer than this many expected intervals is reported as a gap.
 _CLOCK_GAP_INTERVALS = 10
+# Appended to a pandas tokenizing error of the continuous or face file
+_FORMAT_HINT = (
+    "Check that the file is comma-separated with '.' as the decimal separator, and that every "
+    "row has the header's number of fields"
+)
+
+
+def no_clock_column_message(csv_path: Path | str, alternative: str = "") -> str:
+    """The error for a continuous or face file without timeSinceStartup (or *alternative*)."""
+    return (
+        f"No timestamp column found in {csv_path}: the file must be comma-separated, with a "
+        f"header row that includes {GLOBAL_CLOCK_COLUMN}{alternative}"
+    )
 
 
 def check_clock(values: pd.Series, source: Path, head_rate: float | None = None) -> None:
@@ -161,11 +174,7 @@ def load_continuous_data(csv_path: Path, head_rate: float | None = None) -> pd.D
             encoding="utf-8-sig",  # Handle BOM
         )
     except pd.errors.ParserError as e:
-        raise DataLoadError(
-            f"Failed to load {csv_path}: {str(e).strip()}. Check that the file is "
-            "comma-separated with '.' as the decimal separator, and that every row has the "
-            "header's number of fields"
-        ) from e
+        raise DataLoadError(f"Failed to load {csv_path}: {str(e).strip()}. {_FORMAT_HINT}") from e
     except Exception as e:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
 
@@ -177,10 +186,7 @@ def load_continuous_data(csv_path: Path, head_rate: float | None = None) -> pd.D
         df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
 
     if "timestamp" not in df.columns:
-        raise DataLoadError(
-            f"No timestamp column found in {csv_path}: the file must be comma-separated, with "
-            f"a header row that includes {GLOBAL_CLOCK_COLUMN}"
-        )
+        raise DataLoadError(no_clock_column_message(csv_path))
 
     check_clock(df["timestamp"], csv_path, head_rate)
     logger.info(f"Loaded {len(df)} rows, {len(df.columns)} columns")
@@ -217,8 +223,11 @@ def load_face_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFra
             low_memory=False,
             encoding="utf-8-sig",
         )
+    except pd.errors.ParserError as e:
+        raise DataLoadError(f"Failed to load {csv_path}: {str(e).strip()}. {_FORMAT_HINT}") from e
     except Exception as e:
         raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
+    df.attrs["path"] = str(csv_path)  # named when the splitter finds no clock column
 
     # Rename timestamp column
     if GLOBAL_CLOCK_COLUMN in df.columns:
@@ -391,23 +400,29 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
 
     # Unity-recorder key; other engines may not emit it, in which case the
     # 0.02 s default (Unity's 50 Hz fixed update) is only a guess.
+    fixed_delta_time = data.get("fixedDeltaTime", 0.02)
     if "fixedDeltaTime" not in data:
         logger.warning(
             f"SessionMetadata has no 'fixedDeltaTime' key; defaulting to 0.02 s ({json_path}; "
             "the value is shown only in the report header)"
         )
+    elif isinstance(fixed_delta_time, bool) or not isinstance(fixed_delta_time, (int, float)):
+        logger.warning(
+            f"SessionMetadata 'fixedDeltaTime' is {json.dumps(fixed_delta_time)}, not a number; "
+            f"defaulting to 0.02 s ({json_path}; the value is shown only in the report header)"
+        )
+        fixed_delta_time = 0.02
 
     session_id = data.get("session_id")
-    if session_id in (None, ""):  # missing, null or empty
+    if session_id in (None, "") or not isinstance(session_id, str):  # missing, null, "", other
+        shown = "" if session_id in (None, "") else f" (it is {json.dumps(session_id)}, not text)"
         logger.warning(
-            f"{json_path} has no session_id; using 'unknown': custom tables are read only from "
+            f"{json_path} has no session_id{shown}; using 'unknown': custom tables are read only from "
             "a folder named 'unknown_CustomTables' and the report is named unknown_report.html. "
             "Add session_id (the prefix of the session's file names)."
         )
         session_id = "unknown"
-    elif isinstance(session_id, str) and (
-        "/" in session_id or "\\" in session_id or ".." in session_id
-    ):
+    elif "/" in session_id or "\\" in session_id or ".." in session_id:
         raise DataLoadError(
             f"{json_path}: session_id {json.dumps(session_id)} contains '/', '\\' or '..'; it "
             "names the report and the custom-tables folder, so it must be a plain name (the "
@@ -433,7 +448,7 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
         platform=data.get("platform", ""),
         build_id=data.get("build_id", ""),
         sampling_mode=data.get("sampling_mode", ""),
-        fixed_delta_time=data.get("fixedDeltaTime", 0.02),
+        fixed_delta_time=fixed_delta_time,
         schema_rev=data.get("schema_rev", ""),
         **flags,
         flag_problems=flag_problems,
