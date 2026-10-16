@@ -1,7 +1,8 @@
 """
 Sampling rate validation check for ResXR pipeline.
 
-Validates that actual sampling rate matches expected rate.
+Validates that actual sampling rate matches expected rate, and that the
+intervals between the stream's samples are regular.
 """
 
 from __future__ import annotations
@@ -22,8 +23,14 @@ class SamplingRateCheck:
     """
     Validate sampling frequency consistency.
 
-    Calculates the effective sampling rate and flags significant deviations
-    from the expected rate.
+    Flags the stream when its effective sampling rate deviates from the
+    expected rate by more than ``sampling_rate_tolerance``, and when the
+    intervals between its samples are irregular: their coefficient of
+    variation exceeds ``sampling_cv_threshold``. Both use the stream's own
+    clock (``timestamp``, its distinct finite non-zero values from the
+    recording onset), where a new value marks a new SDK sample; rows are
+    written in per-frame bursts on timeSinceStartup, so its intervals are not
+    the samples'. The flags span the recording on timeSinceStartup.
     """
 
     name = "sampling_rate"
@@ -68,11 +75,9 @@ class SamplingRateCheck:
         if onset_idx is None or offset_idx is None or onset_idx > offset_idx:
             return flags
 
-        # Use a slice for numeric work and a full-length mask for from_mask().
-        window = slice(onset_idx, offset_idx + 1)
+        # The flags span the recording window on timeSinceStartup
         valid_window_mask = np.zeros(len(timestamps), dtype=bool)
-        valid_window_mask[window] = True
-        valid_timestamps = timestamps[window]
+        valid_window_mask[onset_idx : offset_idx + 1] = True
 
         # Check deviation against tolerance from config
         if expected_rate > 0:
@@ -95,9 +100,14 @@ class SamplingRateCheck:
                     )
                 )
 
-        # Also check for highly irregular sampling
-        unique_ts = np.unique(valid_timestamps[np.isfinite(valid_timestamps)])
-        time_diffs = np.diff(unique_ts)
+        # Irregular sampling: intervals between the stream's own samples (distinct
+        # finite non-zero clock values from the recording onset, as for the rate)
+        clock = df["timestamp"].to_numpy(dtype=float)
+        first = find_first_nonzero_index(clock)
+        time_diffs = np.array([])
+        if first is not None:
+            samples = np.unique(clock[np.isfinite(clock) & (clock != 0)])
+            time_diffs = np.diff(samples[samples >= clock[first]])
 
         # Calculate coefficient of variation
         if len(time_diffs) > 1 and np.mean(time_diffs) > 0:
