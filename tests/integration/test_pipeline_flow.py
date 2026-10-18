@@ -1813,6 +1813,30 @@ def test_a_filesystem_error_while_removing_is_a_warning_and_the_run_continues(
     assert not (bids_root / "sub-01" / "ses-01").exists()  # the rest was removed
 
 
+def test_an_output_folder_that_cannot_be_checked_is_kept_and_the_run_continues(
+    tmp_path, minimal_config_dict, caplog, monkeypatch
+):
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    unreadable = tmp_path / "bids_out" / "sub-01" / "ses-01"
+    exists = Path.exists
+
+    def exists_or_fail(self, *args, **kwargs):
+        if self == unreadable:
+            raise PermissionError(13, "Access is denied", str(self))
+        return exists(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "exists", exists_or_fail)
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [True, True]
+    (warning,) = [r for r in caplog.records if r.getMessage().startswith("Could not check")]
+    assert warning.levelname == "WARNING"
+    error = PermissionError(13, "Access is denied", str(unreadable))
+    assert warning.getMessage() == (
+        f"Could not check {unreadable} of session sess_a: {error}; it is kept"
+    )
+
+
 def _make_read_only(folder: Path) -> None:
     for path in folder.rglob("*"):
         if path.is_file():

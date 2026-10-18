@@ -408,17 +408,26 @@ class _SessionOutputs:
             self.bids.get_session_dir(mapping, derivative=True),
         ]
         for target in self.targets:
-            self.existed[target] = target.exists()
+            self.existed[target] = self._exists(target)
             for folder in target.parents:
                 if folder == self.bids_root:
                     break
-                self.existed.setdefault(folder, folder.exists())
+                if folder not in self.existed:
+                    self.existed[folder] = self._exists(folder)
 
     def add_report(self, path: Path) -> None:
         """Record whether the session's report file exists before it is written."""
         self.report = path
         self.targets.append(path)
-        self.existed[path] = path.exists()
+        self.existed[path] = self._exists(path)
+
+    def _exists(self, path: Path) -> bool:
+        """Whether *path* exists; one that cannot be checked counts as existing (kept)."""
+        try:
+            return path.exists()
+        except OSError as e:
+            logger.warning(f"Could not check {path} of session {self.name}: {e}; it is kept")
+            return True
 
     def writing(self, target: Path) -> None:
         """Mark a target that the session is about to write."""
