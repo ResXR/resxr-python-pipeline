@@ -14,6 +14,7 @@ from .config import (
     ReferenceFrameConfig,
     ReportConfig,
     SessionMapping,
+    TrackingSpaceFrameConfig,
     ValidationConfig,
 )
 from .constants import (
@@ -71,6 +72,7 @@ __all__ = [
     "DeviceConfig",
     "BIDSConfig",
     "ReferenceFrameConfig",
+    "TrackingSpaceFrameConfig",
     # Exceptions
     "ResXRError",
     "ConfigurationError",
