@@ -146,6 +146,26 @@ def check_stream_clock(values: pd.Series, session_id: str, system: str, column: 
         )
 
 
+def _read_tracking_csv(csv_path: Path) -> pd.DataFrame:
+    """Read a continuous or face CSV, with timeSinceStartup renamed to 'timestamp'."""
+    try:
+        df = pd.read_csv(
+            csv_path,
+            na_values=["", "NaN", "null", "None"],
+            low_memory=False,
+            encoding="utf-8-sig",  # Handle BOM
+        )
+    except pd.errors.ParserError as e:
+        raise DataLoadError(f"Failed to load {csv_path}: {str(e).strip()}. {_FORMAT_HINT}") from e
+    except Exception as e:
+        raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
+
+    for name in (GLOBAL_CLOCK_COLUMN, f"\ufeff{GLOBAL_CLOCK_COLUMN}"):  # BOM left in the name
+        if name in df.columns:
+            return df.rename(columns={name: "timestamp"})
+    return df
+
+
 def load_continuous_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFrame:
     """
     Load ContinuousData CSV with proper dtype handling.
@@ -169,26 +189,7 @@ def load_continuous_data(csv_path: Path, head_rate: float | None = None) -> pd.D
         If file cannot be read or parsed
     """
     logger.info(f"Loading continuous data from: {csv_path}")
-
-    try:
-        df = pd.read_csv(
-            csv_path,
-            na_values=["", "NaN", "null", "None"],
-            low_memory=False,
-            encoding="utf-8-sig",  # Handle BOM
-        )
-    except pd.errors.ParserError as e:
-        raise DataLoadError(f"Failed to load {csv_path}: {str(e).strip()}. {_FORMAT_HINT}") from e
-    except Exception as e:
-        raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
-
-    # Rename timestamp column for consistency
-    if GLOBAL_CLOCK_COLUMN in df.columns:
-        df = df.rename(columns={GLOBAL_CLOCK_COLUMN: "timestamp"})
-    elif f"\ufeff{GLOBAL_CLOCK_COLUMN}" in df.columns:
-        # Handle BOM in column name
-        df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
-
+    df = _read_tracking_csv(csv_path)
     if "timestamp" not in df.columns:
         raise DataLoadError(no_clock_column_message(csv_path))
 
@@ -219,25 +220,8 @@ def load_face_data(csv_path: Path, head_rate: float | None = None) -> pd.DataFra
         If file cannot be read or parsed
     """
     logger.info(f"Loading face data from: {csv_path}")
-
-    try:
-        df = pd.read_csv(
-            csv_path,
-            na_values=["", "NaN", "null", "None"],
-            low_memory=False,
-            encoding="utf-8-sig",
-        )
-    except pd.errors.ParserError as e:
-        raise DataLoadError(f"Failed to load {csv_path}: {str(e).strip()}. {_FORMAT_HINT}") from e
-    except Exception as e:
-        raise DataLoadError(f"Failed to load {csv_path}: {e}") from e
+    df = _read_tracking_csv(csv_path)
     df.attrs["path"] = str(csv_path)  # named when the splitter finds no clock column
-
-    # Rename timestamp column
-    if GLOBAL_CLOCK_COLUMN in df.columns:
-        df = df.rename(columns={GLOBAL_CLOCK_COLUMN: "timestamp"})
-    elif f"\ufeff{GLOBAL_CLOCK_COLUMN}" in df.columns:
-        df = df.rename(columns={f"\ufeff{GLOBAL_CLOCK_COLUMN}": "timestamp"})
     if "timestamp" in df.columns:
         check_clock(df["timestamp"], csv_path, head_rate)
 
