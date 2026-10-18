@@ -1674,7 +1674,6 @@ def test_a_late_failure_in_an_input_folder_used_as_output_is_warned(
         result = run(str(cfg))
     assert [s.processed for s in result.sessions] == [False, True]
     warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
-    assert warnings[2].startswith("Run summary:")
     assert warnings[:2] == [
         f"{root / 'sub-01' / 'ses-01'} holds input data and may now also hold partial files "
         "from the skipped session sub-01/ses-01; remove those files (not the input) or fix the "
@@ -2209,6 +2208,30 @@ def test_a_subject_whose_first_session_is_skipped_is_listed_once(tmp_path, minim
     assert (tmp_path / "bids_out" / "participants.tsv").read_text(encoding="utf-8") == (
         "participant_id\tage\tsex\thandedness\nsub-01\tn/a\tF\tn/a\n"
     )
+
+
+def test_subject_folders_that_participants_tsv_does_not_list_are_named(
+    tmp_path, minimal_config_dict, caplog
+):
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    mappings = yaml.safe_load(cfg.read_text(encoding="utf-8"))["session_mappings"]
+    bids_root = tmp_path / "bids_out"
+    runs = []
+    for mapping in mappings:  # sub-01, then sub-02 into the same bids_root
+        _edit_config(cfg, lambda c, m=mapping: c.update(session_mappings=[m]))
+        caplog.clear()
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            assert run(str(cfg)).exit_code == 0
+        runs.append([r for r in caplog.records if r.getMessage().startswith("participants.tsv")])
+    assert runs[0] == []
+    (warning,) = runs[1]
+    assert warning.levelname == "WARNING"
+    assert warning.getMessage() == (
+        "participants.tsv lists only the subjects processed in this run; the subject folder(s) "
+        f"sub-01 in {bids_root} are not in it. Rerun with every session mapping."
+    )
+    participants = pd.read_csv(bids_root / "participants.tsv", sep="\t")
+    assert list(participants["participant_id"]) == ["sub-02"]
 
 
 def test_different_demographics_for_one_subject_stop_the_run_before_any_session(

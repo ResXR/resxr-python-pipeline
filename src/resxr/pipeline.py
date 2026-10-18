@@ -1089,6 +1089,17 @@ def write_dataset_files(config: PipelineConfig, bids: BIDSLayout, subjects: list
         participants_meta = generate_participants_json()
         write_json(participants_meta, participants_json_path)
 
+        listed = {row["participant_id"] for row in subjects}
+        unlisted = sorted(
+            p.name for p in bids.bids_root.glob("sub-*") if p.is_dir() and p.name not in listed
+        )
+        if unlisted:
+            logger.warning(
+                "participants.tsv lists only the subjects processed in this run; the subject "
+                f"folder(s) {', '.join(unlisted)} in {bids.bids_root} are not in it. Rerun with "
+                "every session mapping."
+            )
+
     # Write .bidsignore
     bidsignore_path = bids.get_bidsignore_file()
     if not bidsignore_path.exists():
