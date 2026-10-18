@@ -373,10 +373,15 @@ class RunResult:
 
 
 class _MessageCounter(logging.Handler):
-    """Counts the WARNING and ERROR records that reach the ``resxr`` logger."""
+    """Counts the WARNING and ERROR records that reach the ``resxr`` logger.
 
-    def __init__(self) -> None:
+    When logging is not configured (*show*), the records are also passed to
+    ``logging.lastResort``, which this handler would otherwise silence.
+    """
+
+    def __init__(self, show: bool) -> None:
         super().__init__(level=logging.WARNING)
+        self.show = show
         self.warnings = 0
         self.errors = 0
 
@@ -385,6 +390,8 @@ class _MessageCounter(logging.Handler):
             self.errors += 1
         else:
             self.warnings += 1
+        if self.show and logging.lastResort is not None:
+            logging.lastResort.handle(record)
 
 
 def _report_path(session: Session, config: PipelineConfig, bids: BIDSLayout) -> Path:
@@ -658,7 +665,7 @@ def run(config_path: str = "config/pipeline_config.yaml") -> RunResult:
             session_label=mapping.session_label,
             processed=False,
         )
-        counter = _MessageCounter()
+        counter = _MessageCounter(show=not resxr_logger.hasHandlers())
         resxr_logger.addHandler(counter)
         unexpected: Exception | None = None
         try:

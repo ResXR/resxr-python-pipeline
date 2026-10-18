@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import shutil
 import stat
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1033,6 +1036,31 @@ def test_quiet_run_still_shows_a_skipped_session_and_exits_1(tmp_path, minimal_c
     ) in out
     assert " INFO - " not in out
     assert " WARNING - " not in out
+
+
+# In a fresh interpreter: pytest's own logging handlers would hide a missing message here.
+@pytest.mark.parametrize("logging_setup", ["none", "basicConfig", "cli"])
+def test_a_session_warning_is_printed_once_however_logging_is_set_up(
+    tmp_path, minimal_config_dict, logging_setup
+):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_metadata(data_dir / "sess_a", lambda m: m.pop("fixedDeltaTime"))
+    src = Path(pipeline_module.__file__).resolve().parents[1]
+    env = {**os.environ, "PYTHONPATH": str(src), "PYTHONDONTWRITEBYTECODE": "1"}
+    if logging_setup == "cli":
+        args = ["-m", "resxr", "-c", str(cfg)]
+    else:
+        setup = "logging.basicConfig(level=logging.WARNING); " if logging_setup != "none" else ""
+        counted = f"resxr.run({str(cfg)!r}).sessions[0].warnings"
+        args = ["-c", f"import logging, resxr; {setup}print({counted})"]
+    proc = subprocess.run(
+        [sys.executable, *args], capture_output=True, text=True, env=env, cwd=tmp_path
+    )
+    assert proc.returncode == 0, proc.stderr
+    printed = proc.stdout + proc.stderr
+    assert printed.count("SessionMetadata has no 'fixedDeltaTime' key; defaulting to 0.02 s") == 1
+    if logging_setup != "cli":
+        assert proc.stdout.strip() == "1"  # still counted for the run summary
 
 
 def test_every_session_failing_gives_an_error_summary_and_exit_code_1(
