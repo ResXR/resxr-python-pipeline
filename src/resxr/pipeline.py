@@ -754,7 +754,7 @@ def _process_session(
         flags = check_registry.run_all(stream, session, config.validation)
         for flag in flags:
             (session.get_stream(flag.system) or stream).quality_flags.append(flag)
-        logger.info(f"  Found {len(flags)} quality flags")
+        logger.info(f"  Found {len(flags)} quality flag(s)")
 
     session.merged_events_data = merge_events(
         session.raw_events_data,

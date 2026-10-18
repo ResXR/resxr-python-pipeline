@@ -210,7 +210,7 @@ def split_continuous_data(
     sid = session.session_id
     df = session.raw_continuous_data
     if df is None or df.empty:
-        logger.warning(f"No continuous data to split (session '{sid}')")
+        logger.warning(f"Session '{sid}': no continuous data to split")
         return {}
 
     all_columns = df.columns.tolist()

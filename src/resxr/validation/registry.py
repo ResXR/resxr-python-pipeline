@@ -170,13 +170,9 @@ class CheckRegistry:
                 )
             except Exception as e:
                 logger.error(
-                    "Session '%s': check '%s' failed on %s — no flags produced for this "
-                    "check. Downstream derivative data may contain unmasked "
-                    "bad segments. Error: %s",
-                    session.session_id,
-                    check.name,
-                    stream.system.value,
-                    e,
+                    f"Session '{session.session_id}': check '{check.name}' failed on "
+                    f"{stream.system.value}; no flags produced for this check. Downstream "
+                    f"derivative data may contain unmasked bad segments. Error: {e}"
                 )
                 session.record_check_not_run(check.name, stream.system.value, f"failed: {e}")
 
