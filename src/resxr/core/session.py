@@ -131,6 +131,9 @@ class QualityFlag:
             if offset_idx < len(boolean_mask) - 1:
                 boolean_mask[offset_idx + 1 :] = False
 
+        # Rows without a valid time cannot bound a segment (a 0 or NaN end would move it)
+        boolean_mask = boolean_mask & np.isfinite(timestamps) & (timestamps != 0)
+
         # Find contiguous segments
         segments = cls._find_contiguous_segments(timestamps, boolean_mask)
 

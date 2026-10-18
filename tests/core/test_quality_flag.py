@@ -479,3 +479,38 @@ def test_from_mask_all_zeros_returns_empty():
         message="m",
     )
     assert flags == []
+
+
+@pytest.mark.parametrize("invalid", [0.0, np.nan], ids=["zero", "nan"])
+@pytest.mark.parametrize("row", [2, 4], ids=["first_row", "last_row"])
+def test_from_mask_a_row_without_time_never_bounds_a_segment(invalid, row):
+    """A 0 or NaN time at a segment's edge is left out; the segment keeps its valid rows."""
+    ts = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    ts[row] = invalid
+    mask = np.array([False, False, True, True, True, False])
+
+    flags = QualityFlag.from_mask(
+        timestamps=ts,
+        boolean_mask=mask,
+        check_name="t",
+        system=TrackingSystem.HANDS,
+        severity="warning",
+        message="m",
+    )
+    expected = [(4.0, 5.0)] if row == 2 else [(3.0, 4.0)]
+    assert [(f.start_time, f.end_time) for f in flags] == expected
+
+
+def test_from_mask_a_row_without_time_inside_a_segment_splits_it():
+    ts = np.array([1.0, 2.0, 3.0, 0.0, 5.0, 6.0])
+    mask = np.array([False, True, True, True, True, False])
+
+    flags = QualityFlag.from_mask(
+        timestamps=ts,
+        boolean_mask=mask,
+        check_name="t",
+        system=TrackingSystem.HANDS,
+        severity="warning",
+        message="m",
+    )
+    assert [(f.start_time, f.end_time) for f in flags] == [(2.0, 3.0), (5.0, 5.0)]
