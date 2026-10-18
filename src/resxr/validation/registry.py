@@ -130,14 +130,6 @@ class CheckRegistry:
                     # Multi-stream check: verify all required streams exist
                     missing = [s for s in required_streams if not session.has_stream(s)]
                     expected = [s for s in missing if s not in session.systems_off]
-                    if missing and not expected:
-                        # Off on purpose (config or metadata): not a check not run
-                        names = ", ".join(s.value for s in missing)
-                        logger.debug(
-                            f"Session '{session.session_id}': check '{check.name}' "
-                            f"skipped: {names} turned off in the config or the metadata"
-                        )
-                        continue
                     if expected:
                         names = ", ".join(s.value for s in expected)
                         why = "; ".join(
@@ -151,6 +143,14 @@ class CheckRegistry:
                                 f"Session '{session.session_id}': check '{check.name}' "
                                 f"not run: {reason}"
                             )
+                        continue
+                    if missing:
+                        # Off on purpose (config or metadata): not a check not run
+                        names = ", ".join(s.value for s in missing)
+                        logger.debug(
+                            f"Session '{session.session_id}': check '{check.name}' "
+                            f"skipped: {names} turned off in the config or the metadata"
+                        )
                         continue
 
                     # Only run when processing the first required stream

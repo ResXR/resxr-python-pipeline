@@ -91,32 +91,23 @@ class HandsTrackingLossCheck:
         if not has_global_clock(self.name, stream, session):
             return flags
         ts_for_flags = df[GLOBAL_CLOCK_COLUMN].values
+        not_run = f"Session '{session.session_id}': {self.name} not run for"
 
         for hand, columns in tracking_flags.items():
             for column in columns:
                 if column not in df.columns:
-                    logger.warning(
-                        f"Session '{session.session_id}': hands_tracking_loss not run for "
-                        f"{hand}: column {column} missing "
-                        "(set validation.settings.tracking_flags)"
-                    )
-                    session.record_check_not_run(
-                        self.name, stream.system.value, f"{hand}: column {column} missing"
-                    )
+                    reason = f"{hand}: column {column} missing"
+                    logger.warning(f"{not_run} {reason} (set validation.settings.tracking_flags)")
+                    session.record_check_not_run(self.name, stream.system.value, reason)
                     continue
                 tracked, unexpected = read_tracking_flag(df[column])
                 if tracked is None:
-                    logger.warning(
-                        f"Session '{session.session_id}': hands_tracking_loss not run for "
+                    reason = (
                         f"{hand}: column {column} holds values other than 0/1, true/false "
-                        f"or blank ({preview(unexpected)}); no hand-loss flags from this column"
+                        f"or blank ({preview(unexpected)})"
                     )
-                    session.record_check_not_run(
-                        self.name,
-                        stream.system.value,
-                        f"{hand}: column {column} holds values other than 0/1, true/false "
-                        f"or blank ({preview(unexpected)})",
-                    )
+                    logger.warning(f"{not_run} {reason}; no hand-loss flags from this column")
+                    session.record_check_not_run(self.name, stream.system.value, reason)
                     continue
                 tracking_lost = (tracked == 0) | (tracked.isna())
                 if tracking_lost.any():
