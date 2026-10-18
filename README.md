@@ -10,11 +10,14 @@ This pipeline is the data-processing half of ResXR; the recordings it reads are 
 
 ## Install
 
+The demo data (`DATA/`) and the reference output (`output/`) are stored with Git LFS, about 860 MB together. Install Git LFS and run `git lfs install` once before you clone: without it, the clone holds small pointer files in place of these files, and the demo run fails.
+
 Clone the repository, then set up an environment with conda **or** uv.
 
 **Conda:**
 
 ```bash
+git lfs install                          # once per machine
 git clone https://github.com/ResXR/resxr-python-pipeline.git
 cd resxr-python-pipeline
 conda env create -f environment.yml      # or environment-dev.yml for dev tools
@@ -24,10 +27,13 @@ conda activate resxr_env                 # resxr_dev for the dev environment
 **uv:**
 
 ```bash
+git lfs install                          # once per machine
 git clone https://github.com/ResXR/resxr-python-pipeline.git
 cd resxr-python-pipeline
 uv sync --all-extras
 ```
+
+With uv, run the commands below through `uv run` (for example `uv run resxr -c config/pipeline_config.yaml`), or activate `.venv` first.
 
 See [Installation](https://docs.resxr.org/python/installation/) for details and requirements.
 
@@ -46,6 +52,8 @@ Equivalent invocations: `python -m resxr -c config/pipeline_config.yaml`, or fro
 import resxr
 resxr.run(config_path="config/pipeline_config.yaml")
 ```
+
+From Python, warnings and errors are printed without any setup; to see the progress lines too, configure logging first, for example `logging.basicConfig(level=logging.INFO)`.
 
 Follow the [Quickstart](https://docs.resxr.org/python/quickstart/) for a full walkthrough.
 
