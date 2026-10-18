@@ -1,7 +1,8 @@
 """
 BIDS channels.tsv generation for ResXR pipeline.
 
-Generates channel descriptor files documenting column structure.
+Generates channel descriptor files documenting column structure, and detects
+the frame of each hand's XRHand joint poses (``detect_hand_joint_frames``).
 
 Accepts a **prepared** DataFrame (output of ``prepare_motion_data``)
 that already contains BIDS LATENCY channels (``latency``,

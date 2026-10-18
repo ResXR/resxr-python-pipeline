@@ -1,7 +1,8 @@
 """
 Data file readers for the ResXR pipeline.
 
-Handles loading CSV tracking data and JSON metadata files.
+Loads a session's CSV tracking data and JSON metadata, and warns where they
+depart from the input contract (clock columns, ``*_enabled`` flags, session_id).
 """
 
 from __future__ import annotations

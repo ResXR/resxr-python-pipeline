@@ -1,7 +1,8 @@
 """
 Output file writers for the ResXR pipeline.
 
-Handles writing BIDS-compliant TSV and JSON files.
+Writes BIDS TSV and JSON files, copies a session into sourcedata/, and
+deletes output (``remove_path``), including files marked read-only.
 """
 
 from __future__ import annotations
