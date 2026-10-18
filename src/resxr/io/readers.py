@@ -49,9 +49,9 @@ def no_clock_column_message(csv_path: Path | str, alternative: str = "") -> str:
 def check_clock(values: pd.Series, source: Path, head_rate: float | None = None) -> None:
     """Warn about a timeSinceStartup column that departs from the input contract.
 
-    The column must be in seconds, step forward and hold a value in every row
-    except the leading and trailing zeros. Empty, NaN and infinite cells, zeros
-    between valid values and a single valid value are reported, and such rows
+    The column must be in seconds, step forward and hold a finite, nonzero
+    value in every row. Empty, NaN and infinite cells, zeros (before, between or
+    after the valid values) and a single valid value are reported, and such rows
     are left out of the step checks. A step over 10 expected Head intervals (10
     median steps without a Head rate) is a gap, at INFO. Nothing is changed.
     """
@@ -75,6 +75,14 @@ def check_clock(values: pd.Series, source: Path, head_rate: float | None = None)
     if valid.size < 2:
         return
     inside = np.flatnonzero(has_time)
+    leading = int((t[: inside[0]] == 0).sum())
+    trailing = int((t[inside[-1] + 1 :] == 0).sum())
+    if leading or trailing:
+        logger.warning(
+            f"{source}: {GLOBAL_CLOCK_COLUMN} is 0 in {leading} row(s) before its first valid "
+            f"value and {trailing} after its last; their global latency is n/a, and quality "
+            "checks and masking do not cover them"
+        )
     zeros = int((t[inside[0] : inside[-1] + 1] == 0).sum())
     if zeros:
         logger.warning(

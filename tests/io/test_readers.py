@@ -747,22 +747,45 @@ class TestLoadSessionCustomTableLogging:
 # ===========================================================================
 
 
+def _zeros_at_the_edges(path, leading: int, trailing: int) -> str:
+    return (
+        f"{path}: timeSinceStartup is 0 in {leading} row(s) before its first valid value and "
+        f"{trailing} after its last; their global latency is n/a, and quality checks and masking "
+        "do not cover them"
+    )
+
+
 class TestClockDepartures:
     @staticmethod
-    def _load(tmp_path, clock, caplog):
+    def _load(tmp_path, clock, caplog, loader=load_continuous_data):
         path = tmp_path / "x_ContinuousData.csv"
         n = len(clock)
         pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": np.zeros(n)}).to_csv(
             path, index=False
         )
         with caplog.at_level(logging.WARNING, logger="resxr"):
-            df = load_continuous_data(path)
+            df = loader(path)
         return path, df
 
-    def test_valid_clock_with_leading_and_trailing_zeros_is_silent(self, tmp_path, caplog):
-        clock = np.r_[0.0, 0.0, 1.0 + np.arange(50) / 72.0, 0.0]
-        self._load(tmp_path, clock, caplog)
+    def test_valid_clock_is_silent(self, tmp_path, caplog):
+        self._load(tmp_path, 1.0 + np.arange(50) / 72.0, caplog)
         assert caplog.records == []
+
+    @pytest.mark.parametrize("loader", [load_continuous_data, load_face_data])
+    def test_leading_and_trailing_zeros_are_counted(self, tmp_path, caplog, loader):
+        clock = np.r_[0.0, 0.0, 1.0 + np.arange(50) / 72.0, 0.0]
+        path, df = self._load(tmp_path, clock, caplog, loader)
+        assert [r.getMessage() for r in caplog.records] == [_zeros_at_the_edges(path, 2, 1)]
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_empty_cells_at_the_edges_are_not_counted_as_zeros(self, tmp_path, caplog):
+        clock = np.r_[np.nan, 0.0, 1.0 + np.arange(50) / 72.0, np.nan]
+        path, _ = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: 2 row(s) have no timeSinceStartup value (empty, NaN or infinite); their "
+            "global latency is n/a",
+            _zeros_at_the_edges(path, 1, 0),
+        ]
 
     def test_milliseconds_are_reported_and_not_converted(self, tmp_path, caplog):
         clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
@@ -795,11 +818,12 @@ class TestClockDepartures:
     def test_zero_values_between_valid_values_are_counted(self, tmp_path, caplog):
         clock = 1.0 + np.arange(50) / 72.0
         clock[20:30] = 0.0
-        clock = np.r_[0.0, 0.0, clock, 0.0]  # leading and trailing zeros are not counted
+        clock = np.r_[0.0, 0.0, clock, 0.0]  # leading and trailing zeros are counted apart
         path, df = self._load(tmp_path, clock, caplog)
         assert [r.getMessage() for r in caplog.records] == [
+            _zeros_at_the_edges(path, 2, 1),
             f"{path}: 10 row(s) have a zero timeSinceStartup between valid values; their "
-            "global latency is n/a"
+            "global latency is n/a",
         ]
         assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
 
@@ -838,7 +862,7 @@ class TestClockDepartures:
         clock[11:] += 0.3  # a 0.31 s step after row 10
         clock[31:] += 0.5  # a 0.51 s step after row 30, at 1.0 + 0.30 + 0.3 = 1.60
         clock[41:] += 0.12  # a 0.13 s step: shorter than 10 Head intervals (0.1389 s)
-        clock = np.r_[0.0, clock, 0.0]  # zero rows (before onset, after offset) are ignored
+        clock = np.r_[0.0, clock, 0.0]  # zero rows (before onset, after offset) are not gaps
         path, (record,) = self._gap_lines(tmp_path, clock, caplog, loader, head_rate=72.0)
         assert record.levelname == "INFO"
         assert record.getMessage() == (
@@ -846,7 +870,8 @@ class TestClockDepartures:
             "interval (0.0139 s); the longest is 0.51 s, after timeSinceStartup 1.60. "
             "Rows are not interpolated."
         )
-        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+        warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warnings == [_zeros_at_the_edges(path, 1, 1)]
 
     def test_without_a_head_rate_the_reference_is_the_median_step(self, tmp_path, caplog):
         clock = 1.0 + np.arange(50) / 72.0  # median step 1/72 s = 0.0139 s
