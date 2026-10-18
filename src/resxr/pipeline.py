@@ -66,6 +66,8 @@ _BIDS_LABEL = re.compile(r"[A-Za-z0-9]+")
 # participants.tsv columns after participant_id, each read from the session mapping
 _PARTICIPANT_FIELDS = ("age", "sex", "handedness")
 
+_SYSTEM_NAMES = [system.value for system in TrackingSystem]
+
 
 def _participant_row(mapping: SessionMapping) -> dict[str, str]:
     """The subject's participants.tsv row, from one of its mappings ("n/a" where not given)."""
@@ -77,21 +79,22 @@ def _participant_row(mapping: SessionMapping) -> dict[str, str]:
 
 
 def validate_config(config: PipelineConfig) -> None:
-    """Reject settings that would otherwise be ignored or produce a wrong dataset.
+    """Raise ConfigurationError for settings that would be ignored or write a wrong dataset."""
+    problems = [
+        *_unknown_name_problems(config),
+        *_rate_problems(config),
+        *_settings_problems(config),
+        *_label_problems(config),
+        *_mapping_problems(config),
+        *_participant_problems(config),
+        *_masking_problems(config),
+    ]
+    if problems:
+        raise ConfigurationError("; ".join(problems))
 
-    Raises one ConfigurationError that names every problem found:
 
-    - unknown check names and unknown tracking-system names;
-    - sampling rates that are not positive, or missing for an enabled system;
-    - ``validation.settings`` keys that no registered check declares, and
-      undefined column-group names in ``check_column_groups``;
-    - with masking on, ``masking_checks`` names that are not enabled checks;
-    - subject, session and task labels that are not BIDS labels;
-    - session mappings that share a subject/session pair or a folder;
-    - mappings of one subject with different age, sex or handedness
-      (participants.tsv has one row per subject; a value given in one mapping
-      and left out in another counts as different).
-    """
+def _unknown_name_problems(config: PipelineConfig) -> list[str]:
+    """Check names and tracking-system names that do not exist."""
     problems = []
     known_checks = check_registry.available_checks
     for setting, names in (
@@ -105,25 +108,29 @@ def validate_config(config: PipelineConfig) -> None:
                 f"{sorted(known_checks)}"
             )
 
-    system_names = [system.value for system in TrackingSystem]
     for setting, keys in (
         ("systems", config.systems),
         ("sampling_frequencies", config.sampling_frequencies),
         ("system_descriptions", config.system_descriptions),
         ("preprocessing.alternate_time_columns", config.preprocessing.alternate_time_columns),
     ):
-        unknown = [key for key in keys if key not in system_names]
+        unknown = [key for key in keys if key not in _SYSTEM_NAMES]
         if unknown:
             problems.append(
-                f"{setting} names unknown tracking system(s) {unknown}; valid names: {system_names}"
+                f"{setting} names unknown tracking system(s) {unknown}; valid names: {_SYSTEM_NAMES}"
             )
+    return problems
 
+
+def _rate_problems(config: PipelineConfig) -> list[str]:
+    """Sampling rates that are not positive, or missing for an enabled tracking system."""
+    problems = []
     not_positive = {name: rate for name, rate in config.sampling_frequencies.items() if rate <= 0}
     if not_positive:
         problems.append(f"sampling_frequencies must be positive; got {not_positive}")
     no_rate = [
         name
-        for name in system_names
+        for name in _SYSTEM_NAMES
         if config.is_system_enabled(name) and name not in config.sampling_frequencies
     ]
     if no_rate:
@@ -132,7 +139,12 @@ def validate_config(config: PipelineConfig) -> None:
             f"{'is' if len(no_rate) == 1 else 'are'} enabled; add the expected rate in Hz, or "
             "set systems.<name>.enabled: false for a system that was not recorded"
         )
+    return problems
 
+
+def _settings_problems(config: PipelineConfig) -> list[str]:
+    """``validation.settings`` keys that no check reads, and undefined column-group names."""
+    problems = []
     known_settings = sorted(set(check_registry.settings_keys) | set(ValidationConfig.SETTINGS_KEYS))
     unknown_settings = [key for key in config.validation.settings if key not in known_settings]
     if unknown_settings:
@@ -143,27 +155,32 @@ def validate_config(config: PipelineConfig) -> None:
         )
 
     selected = config.validation.get("check_column_groups")
-    if selected is not None:
-        group_names = [group.name for group in config.validation.column_groups]
-        if not isinstance(selected, dict) or not all(
-            names is None or (isinstance(names, list) and all(isinstance(n, str) for n in names))
-            for names in selected.values()  # None: every group (get_column_groups)
-        ):
-            problems.append(
-                "validation.settings.check_column_groups must map check names to lists of "
-                f"column-group names; got {selected!r}"
-            )
-        else:
-            unknown_groups = sorted(
-                {name for names in selected.values() for name in names or []} - set(group_names)
-            )
-            if unknown_groups:
-                problems.append(
-                    "validation.settings.check_column_groups names column group(s) "
-                    f"{unknown_groups} that validation.column_groups does not define; defined "
-                    f"groups: {group_names}"
-                )
+    if selected is None:
+        return problems
+    group_names = [group.name for group in config.validation.column_groups]
+    if not isinstance(selected, dict) or not all(
+        names is None or (isinstance(names, list) and all(isinstance(n, str) for n in names))
+        for names in selected.values()  # None: every group (get_column_groups)
+    ):
+        problems.append(
+            "validation.settings.check_column_groups must map check names to lists of "
+            f"column-group names; got {selected!r}"
+        )
+        return problems
+    unknown_groups = sorted(
+        {name for names in selected.values() for name in names or []} - set(group_names)
+    )
+    if unknown_groups:
+        problems.append(
+            "validation.settings.check_column_groups names column group(s) "
+            f"{unknown_groups} that validation.column_groups does not define; defined "
+            f"groups: {group_names}"
+        )
+    return problems
 
+
+def _label_problems(config: PipelineConfig) -> list[str]:
+    """Subject, session and task labels that are not BIDS labels."""
     labels = [("output.task_name", config.output.task_name)]
     for mapping in config.session_mappings:
         labels += [
@@ -171,33 +188,48 @@ def validate_config(config: PipelineConfig) -> None:
             (f"session_label of {mapping.source_dir}", mapping.session_label),
         ]
     not_labels = [f"{name} {value!r}" for name, value in labels if not _BIDS_LABEL.fullmatch(value)]
-    if not_labels:
-        problems.append(
-            "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes are "
-            f"added): {', '.join(not_labels)}"
-        )
+    if not not_labels:
+        return []
+    return [
+        "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes are "
+        f"added): {', '.join(not_labels)}"
+    ]
 
+
+def _mapping_problems(config: PipelineConfig) -> list[str]:
+    """Session mappings that share a subject/session pair or a folder."""
     by_target: dict[tuple[str, str], list[str]] = {}
     by_folder: dict[Path, list[str]] = {}
-    by_subject: dict[str, list[SessionMapping]] = {}
     for mapping in config.session_mappings:
         target = (mapping.subject_id, mapping.session_label)
         by_target.setdefault(target, []).append(mapping.source_dir)
         folder = _source_dir(mapping, config).resolve()
         by_folder.setdefault(folder, []).append(f"sub-{target[0]} ses-{target[1]}")
+    problems = [
+        f"session_mappings maps {len(folders)} folders to sub-{subject} ses-{session}: "
+        f"{', '.join(folders)}; each subject/session pair must be unique"
+        for (subject, session), folders in by_target.items()
+        if len(folders) > 1
+    ]
+    problems += [
+        f"session_mappings maps the folder {folder} {len(targets)} times "
+        f"({', '.join(targets)}); map each folder once"
+        for folder, targets in by_folder.items()
+        if len(targets) > 1
+    ]
+    return problems
+
+
+def _participant_problems(config: PipelineConfig) -> list[str]:
+    """Mappings of one subject that give different age, sex or handedness.
+
+    participants.tsv has one row per subject; a value given in one mapping and
+    left out in another counts as different.
+    """
+    by_subject: dict[str, list[SessionMapping]] = {}
+    for mapping in config.session_mappings:
         by_subject.setdefault(mapping.subject_id, []).append(mapping)
-    for (subject, session), folders in by_target.items():
-        if len(folders) > 1:
-            problems.append(
-                f"session_mappings maps {len(folders)} folders to sub-{subject} ses-{session}: "
-                f"{', '.join(folders)}; each subject/session pair must be unique"
-            )
-    for folder, targets in by_folder.items():
-        if len(targets) > 1:
-            problems.append(
-                f"session_mappings maps the folder {folder} {len(targets)} times "
-                f"({', '.join(targets)}); map each folder once"
-            )
+    problems = []
     for subject, subject_mappings in by_subject.items():
         rows = [_participant_row(mapping) for mapping in subject_mappings]
         for name in _PARTICIPANT_FIELDS:
@@ -215,23 +247,27 @@ def validate_config(config: PipelineConfig) -> None:
                 f"participants.tsv has one row per subject, so every mapping of sub-{subject} "
                 f"must give the same {name}, or none may give it"
             )
+    return problems
 
-    if config.preprocessing.apply_quality_masking and config.preprocessing.masking_checks:
-        enabled = set(config.validation.enabled_checks)
-        not_enabled = [  # unknown names are reported above
-            name
-            for name in dict.fromkeys(config.preprocessing.masking_checks)
-            if name in known_checks and name not in enabled
-        ]
-        if not_enabled:
-            problems.append(
-                f"preprocessing.masking_checks names check(s) {not_enabled} that are not in "
-                "validation.enabled_checks; they never run, so nothing would be masked for "
-                "them. Add them to enabled_checks or remove them from masking_checks."
-            )
 
-    if problems:
-        raise ConfigurationError("; ".join(problems))
+def _masking_problems(config: PipelineConfig) -> list[str]:
+    """With masking on, ``masking_checks`` names that are known but not enabled."""
+    if not (config.preprocessing.apply_quality_masking and config.preprocessing.masking_checks):
+        return []
+    known_checks = check_registry.available_checks
+    enabled = set(config.validation.enabled_checks)
+    not_enabled = [  # unknown names are reported by _unknown_name_problems
+        name
+        for name in dict.fromkeys(config.preprocessing.masking_checks)
+        if name in known_checks and name not in enabled
+    ]
+    if not not_enabled:
+        return []
+    return [
+        f"preprocessing.masking_checks names check(s) {not_enabled} that are not in "
+        "validation.enabled_checks; they never run, so nothing would be masked for "
+        "them. Add them to enabled_checks or remove them from masking_checks."
+    ]
 
 
 def load_config(config_path: str | Path) -> PipelineConfig:
