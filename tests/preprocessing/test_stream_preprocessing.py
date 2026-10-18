@@ -547,7 +547,7 @@ class TestPrepareMotionData:
                 "signal": np.ones(7),
             }
         )
-        result = prepare_motion_data(df, global_onset=1.0)
+        result = prepare_motion_data(df, time_zero=1.0)
         np.testing.assert_allclose(
             result["latency"], [np.nan, 0.0, np.nan, 0.2, np.nan, 0.4, np.nan], equal_nan=True
         )

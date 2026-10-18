@@ -860,7 +860,7 @@ def write_bids_output(
             continue
 
         # Prepare for BIDS output (add LATENCY channels, strip internal time cols)
-        prepared = prepare_motion_data(data, global_onset=session.motion_time_zero)
+        prepared = prepare_motion_data(data, time_zero=session.motion_time_zero)
 
         # Write motion.tsv (no header)
         motion_path = bids.get_motion_file(session, system, "tsv", derivative=derivative)
