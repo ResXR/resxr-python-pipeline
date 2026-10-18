@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -231,6 +232,23 @@ class TestSessionMetadataDepartures:
             f"Could not parse UTC timestamp: '10/06/2026' (utc_start_iso8601 in {path}); "
             "scans.tsv acq_time is n/a"
         ) in caplog.text
+
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "2026-06-10T21:22:45.5772210+03:00",
+            "2026-06-10T15:52:45.5772210-02:30",
+            "2026-06-10T18:22:45.5772210+00:00",
+            "2026-06-10T18:22:45.5772210Z",
+            "2026-06-10T18:22:45.5772210",
+        ],
+        ids=["plus_3h", "minus_2h30", "zero_offset", "Z", "no_offset"],
+    )
+    def test_utc_start_with_an_offset_is_converted_to_utc(self, tmp_path, caplog, written):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02, "utc_start_iso8601": written}
+        _, meta = self._load(tmp_path, data, caplog)
+        assert meta.utc_start == datetime(2026, 6, 10, 18, 22, 45, 577221)
+        assert caplog.records == []
 
     @pytest.mark.parametrize(
         "session_id",

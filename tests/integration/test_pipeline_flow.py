@@ -898,6 +898,18 @@ def test_pipeline_scans_acq_time_keeps_subseconds_and_utc(tmp_path, minimal_conf
         assert set(scans["acq_time"]) == {"2026-06-10T10:14:19.472337Z"}
 
 
+def test_pipeline_scans_acq_time_converts_an_offset_to_utc(tmp_path, minimal_config_dict):
+    data_dir, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    _edit_metadata(
+        data_dir / "sess_a",
+        lambda m: m.update(utc_start_iso8601="2026-06-10T21:22:45.5772210+03:00"),
+    )
+    run(str(cfg))
+    (scans_path,) = (tmp_path / "bids_out" / "sub-01" / "ses-01").glob("*_scans.tsv")
+    scans = pd.read_csv(scans_path, sep="\t", dtype=str)
+    assert set(scans["acq_time"]) == {"2026-06-10T18:22:45.577221Z"}
+
+
 def test_hand_joint_channels_carry_the_detected_frame(tmp_path, minimal_config_dict, caplog):
     data_dir = tmp_path / "sessions"
     bids_root = tmp_path / "bids_out"

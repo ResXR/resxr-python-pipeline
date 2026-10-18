@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -381,6 +381,8 @@ def load_session_metadata(json_path: Path) -> SessionMetadata:
             utc_str = utc_raw.rstrip("Z")
             utc_str = re.sub(r"\.(\d+)", lambda m: "." + m.group(1)[:6].ljust(6, "0"), utc_str)
             utc_start = datetime.fromisoformat(utc_str)
+            if utc_start.tzinfo is not None:  # an offset such as +03:00: acq_time is written in UTC
+                utc_start = utc_start.astimezone(timezone.utc).replace(tzinfo=None)
         except (ValueError, AttributeError):
             logger.warning(
                 f"Could not parse UTC timestamp: {utc_raw!r} (utc_start_iso8601 in {json_path}); "
