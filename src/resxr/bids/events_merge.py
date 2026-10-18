@@ -29,7 +29,9 @@ def merge_events(
     """Merge native events and custom-class rows into one wide sparse frame.
 
     Always returns at least STANDARD_COLS. Missing cells become the string
-    "n/a". Rows are sorted by onset ascending.
+    "n/a". Rows are sorted by onset ascending. *time_zero* (the session's
+    motion time zero, in timeSinceStartup seconds) is subtracted from every
+    onset, so onsets share the motion files' ``latency_global`` origin.
     """
 
     def relative_frame(df: pd.DataFrame) -> pd.DataFrame:

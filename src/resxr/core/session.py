@@ -454,7 +454,11 @@ class Session:
         return True
 
     def initialize_motion_time_zero(self) -> float:
-        """Set the time zero: the main data's first valid timeSinceStartup."""
+        """Set and return the time zero: the main data's first valid timeSinceStartup.
+
+        Raises DataLoadError when the continuous data has no finite, nonzero
+        timeSinceStartup value.
+        """
         time_zero = None
         main = self.raw_continuous_data
         if main is not None and "timestamp" in main.columns:

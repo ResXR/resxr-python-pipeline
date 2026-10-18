@@ -79,17 +79,18 @@ def _participant_row(mapping: SessionMapping) -> dict[str, str]:
 def validate_config(config: PipelineConfig) -> None:
     """Reject settings that would otherwise be ignored or produce a wrong dataset.
 
-    Raises ConfigurationError naming every problem found: unknown check names,
-    unknown tracking-system names, sampling rates that are not positive or are
-    missing for an enabled tracking system,
-    ``validation.settings`` keys that no registered check declares, column-group
-    names in ``validation.settings.check_column_groups`` that are not defined, with
-    masking on, ``masking_checks`` names that are not enabled checks, subject,
-    session and task labels that are not BIDS labels, session mappings that
-    share a subject/session pair or a folder, and mappings of one subject that
-    give different age, sex or handedness values (participants.tsv has one row
-    per subject; a value given in one mapping and left out in another counts as
-    different).
+    Raises one ConfigurationError that names every problem found:
+
+    - unknown check names and unknown tracking-system names;
+    - sampling rates that are not positive, or missing for an enabled system;
+    - ``validation.settings`` keys that no registered check declares, and
+      undefined column-group names in ``check_column_groups``;
+    - with masking on, ``masking_checks`` names that are not enabled checks;
+    - subject, session and task labels that are not BIDS labels;
+    - session mappings that share a subject/session pair or a folder;
+    - mappings of one subject with different age, sex or handedness
+      (participants.tsv has one row per subject; a value given in one mapping
+      and left out in another counts as different).
     """
     problems = []
     known_checks = check_registry.available_checks
@@ -239,6 +240,16 @@ def load_config(config_path: str | Path) -> PipelineConfig:
     Used by :func:`run` and by the CLI's ``--dry-run``, so both report the
     same configuration errors.
 
+    Parameters
+    ----------
+    config_path : str | Path
+        Path to the YAML configuration file
+
+    Returns
+    -------
+    PipelineConfig
+        The validated configuration
+
     Raises
     ------
     ConfigurationError
@@ -281,10 +292,12 @@ class RunResult:
 
     @property
     def processed(self) -> list[SessionOutcome]:
+        """The sessions that were processed, in run order."""
         return [s for s in self.sessions if s.processed]
 
     @property
     def skipped(self) -> list[SessionOutcome]:
+        """The sessions that were skipped (each with its ``reason``), in run order."""
         return [s for s in self.sessions if not s.processed]
 
     @property
@@ -797,6 +810,9 @@ def write_bids_output(
         Pipeline configuration
     bids : BIDSLayout
         BIDS layout manager
+    derivative : bool
+        Write the derivative dataset (each stream's ``clean_data`` when set)
+        instead of the raw one; events.tsv is written only for raw
     """
     # Create directory structure
     bids.create_structure(session, derivative=derivative)

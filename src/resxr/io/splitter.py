@@ -196,7 +196,16 @@ def split_continuous_data(
     Returns
     -------
     Dict[TrackingSystem, TrackingStream]
-        Mapping of tracking systems to their data streams
+        Mapping of tracking systems to their data streams. An expected stream
+        that is not created gets its reason in ``session.streams_absent``.
+
+    Raises
+    ------
+    ConfigurationError
+        If an enabled tracking system has no entry in *sampling_frequencies*
+    DataLoadError
+        If the face file has neither timeSinceStartup nor the configured Face
+        clock column, or a stream cannot be timed (``TrackingStream``)
     """
     sid = session.session_id
     df = session.raw_continuous_data
