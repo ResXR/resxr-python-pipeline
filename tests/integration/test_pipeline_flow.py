@@ -1607,6 +1607,45 @@ def test_a_late_failure_in_an_existing_output_warns_once_per_folder(
     assert "Removed the output" not in caplog.text
 
 
+def test_a_late_failure_in_an_input_folder_used_as_output_is_warned(
+    tmp_path, minimal_config_dict, caplog, monkeypatch
+):
+    root = tmp_path / "bids_out"  # the output folders are the input folders
+    _write_clocked_session_dir(root, "sub-01/ses-01", session_id="A")
+    _write_clocked_session_dir(root, "sub-02/ses-01", session_id="B")
+    inputs = _files(root / "sub-01" / "ses-01")
+    minimal_config_dict["preprocessing"]["alternate_time_columns"] = {
+        "Head": "Node_Head_Time",
+        "Hands": "Node_HandLeft_Time",
+    }
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=root,
+        bids_root=root,
+        session_mappings=[
+            {"source_dir": "sub-01/ses-01", "subject_id": "01", "session_label": "01"},
+            {"source_dir": "sub-02/ses-01", "subject_id": "02", "session_label": "01"},
+        ],
+        report=True,
+    )
+    _fail_report_of_session_a(monkeypatch)
+    with caplog.at_level(logging.INFO, logger="resxr"):
+        result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, True]
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert warnings[2].startswith("Run summary:")
+    assert warnings[:2] == [
+        f"{root / 'sub-01' / 'ses-01'} holds input data and may now also hold partial files "
+        "from the skipped session sub-01/ses-01; remove those files (not the input) or fix the "
+        "session and rerun.",
+        f"Not removed: {root / 'sub-01' / 'ses-01' / 'A_report.html'} is outside the output "
+        "folders or holds input data",
+    ]
+    after = _files(root / "sub-01" / "ses-01")
+    assert {name: after[name] for name in inputs} == inputs
+
+
 # ── Clock values between valid values (review 16 Oct) ─────────────────
 
 

@@ -501,13 +501,20 @@ class _SessionOutputs:
 
     def _warn_kept(self, target: Path, kept: list[Path], how: str) -> None:
         """One warning per kept target (none for a file inside a kept folder)."""
-        if not self._deletable(target):
-            return  # input data (a session read from sourcedata/), not output to remove
         marked = target in self.marked
+        holds_input = not self._deletable(target)
+        if holds_input and not marked:
+            return  # input data (a session read from sourcedata/), not output to remove
         if not marked and self.written.get(target, self.name) != self.name:
             return  # another session of this run wrote it
         if not any(folder in target.parents for folder in kept):
-            if marked:
+            if holds_input:
+                logger.warning(
+                    f"{target} holds input data and may now also hold partial files from the "
+                    f"{how} session {self.name}; remove those files (not the input) or fix the "
+                    "session and rerun."
+                )
+            elif marked:
                 logger.warning(
                     f"{target} existed before this session started and may now hold partial "
                     f"files from the {how} session {self.name}; remove it or fix the session "
