@@ -222,14 +222,19 @@ def has_global_clock(check: str, stream: TrackingStream, session: Session) -> bo
 
 def register_check(check: ValidationCheck) -> ValidationCheck:
     """
-    Decorator to register a validation check.
+    Register a validation check instance (``run_all`` calls it with the stream,
+    the session and the validation config).
 
     Usage:
-        @register_check
         class MyCheck:
             name = "my_check"
+            description = "What the check flags"
             settings_keys = ("my_check_threshold",)  # validation.settings keys it reads
-            ...
+
+            def __call__(self, stream, session, config):
+                ...
+
+        register_check(MyCheck())
     """
     check_registry.register(check)
     return check
