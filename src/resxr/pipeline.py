@@ -86,6 +86,7 @@ def validate_config(config: PipelineConfig) -> None:
         *_settings_problems(config),
         *_label_problems(config),
         *_mapping_problems(config),
+        *_letter_case_problems(config),
         *_participant_problems(config),
         *_masking_problems(config),
     ]
@@ -216,6 +217,35 @@ def _mapping_problems(config: PipelineConfig) -> list[str]:
         f"({', '.join(targets)}); map each folder once"
         for folder, targets in by_folder.items()
         if len(targets) > 1
+    ]
+    return problems
+
+
+def _letter_case_problems(config: PipelineConfig) -> list[str]:
+    """Subject ids, or session labels of one subject, that differ only in letter case.
+
+    The default Windows and macOS file systems ignore letter case, so both would go into
+    one folder.
+    """
+    subjects: dict[str, set[str]] = {}
+    sessions: dict[tuple[str, str], set[str]] = {}
+    for mapping in config.session_mappings:
+        subjects.setdefault(mapping.subject_id.casefold(), set()).add(mapping.subject_id)
+        key = (mapping.subject_id, mapping.session_label.casefold())
+        sessions.setdefault(key, set()).add(mapping.session_label)
+    problems = []
+    clashes = [sorted(ids) for ids in subjects.values() if len(ids) > 1]
+    if clashes:
+        problems.append(
+            f"session_mappings has subject_id values that differ only in letter case {clashes}; "
+            "Windows and macOS write them into one sub- folder, so use one spelling"
+        )
+    problems += [
+        f"session_mappings has session_label values of sub-{subject} that differ only in "
+        f"letter case {sorted(labels)}; Windows and macOS write them into one ses- folder, so "
+        "use one spelling"
+        for (subject, _), labels in sessions.items()
+        if len(labels) > 1
     ]
     return problems
 

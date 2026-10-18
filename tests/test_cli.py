@@ -194,6 +194,17 @@ class TestMainDryRun:
             in caplog.text
         )
 
+    def test_dry_run_rejects_subject_ids_that_differ_only_in_letter_case(
+        self, tmp_path, minimal_config_dict, caplog
+    ):
+        minimal_config_dict["session_mappings"] = [_mapping("a", "P01"), _mapping("b", "p01")]
+        path = _write(tmp_path, minimal_config_dict)
+        assert main(["--config", str(path), "--dry-run"]) == 1
+        assert (
+            f"Configuration error in {path}: session_mappings has subject_id values that differ "
+            "only in letter case [['P01', 'p01']]"
+        ) in caplog.text
+
     def test_dry_run_rejects_a_missing_rate_for_an_enabled_system(
         self, tmp_path, minimal_config_dict, caplog
     ):
@@ -334,6 +345,13 @@ class TestMainConfigErrors:
                 lambda cfg: cfg.update(session_mappings=[_mapping("a", "sub-01")]),
                 "BIDS labels may hold only letters and digits (the sub-, ses- and task- prefixes "
                 "are added): subject_id of a 'sub-01'",
+            ),
+            (
+                lambda cfg: cfg.update(
+                    session_mappings=[_mapping("a", "P01"), _mapping("b", "p01")]
+                ),
+                "session_mappings has subject_id values that differ only in letter case "
+                "[['P01', 'p01']]",
             ),
             (
                 lambda cfg: cfg["sampling_frequencies"].pop("Eyes"),
@@ -537,6 +555,28 @@ class TestSessionMappingsAndLabels:
     def test_separators_spaces_and_non_ascii_are_not_labels(self, minimal_config_dict, label):
         message = self._error(minimal_config_dict, [_mapping("a", label)])
         assert f"subject_id of a {label!r}" in message
+
+    def test_subject_ids_that_differ_only_in_letter_case_are_an_error(self, minimal_config_dict):
+        mappings = [_mapping("a", "P01"), _mapping("b", "p01"), _mapping("c", "P02")]
+        assert self._error(minimal_config_dict, mappings) == (
+            "session_mappings has subject_id values that differ only in letter case "
+            "[['P01', 'p01']]; Windows and macOS write them into one sub- folder, so use one "
+            "spelling"
+        )
+
+    def test_session_labels_of_one_subject_that_differ_only_in_letter_case_are_an_error(
+        self, minimal_config_dict
+    ):
+        mappings = [
+            _mapping("a", "01", "pre"),
+            _mapping("b", "01", "PRE"),
+            _mapping("c", "02", "Pre"),  # another subject: its own ses- folder
+        ]
+        assert self._error(minimal_config_dict, mappings) == (
+            "session_mappings has session_label values of sub-01 that differ only in letter "
+            "case ['PRE', 'pre']; Windows and macOS write them into one ses- folder, so use one "
+            "spelling"
+        )
 
     def test_unique_mappings_with_letter_and_digit_labels_are_accepted(self, minimal_config_dict):
         minimal_config_dict["session_mappings"] = [
