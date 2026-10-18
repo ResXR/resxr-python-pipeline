@@ -341,6 +341,7 @@ class _SessionOutputs:
         source_dirs: list[Path],
         written: dict[Path, str] | None = None,
     ):
+        self.bids = bids
         self.bids_root = bids.bids_root
         self.roots = [bids.bids_root.resolve()]
         if config.report.output_dir is not None:
@@ -354,13 +355,13 @@ class _SessionOutputs:
         self.marked: list[Path] = []
         self.report: Path | None = None
 
-    def start(self, mapping: SessionMapping, bids: BIDSLayout) -> None:
+    def start(self, mapping: SessionMapping) -> None:
         """Record which output folders of the session exist before it is read."""
         self.name = mapping.source_dir
         self.targets = [
-            bids.sourcedata_session_dir(mapping),
-            bids.get_session_dir(mapping),
-            bids.get_session_dir(mapping, derivative=True),
+            self.bids.sourcedata_session_dir(mapping),
+            self.bids.get_session_dir(mapping),
+            self.bids.get_session_dir(mapping, derivative=True),
         ]
         for target in self.targets:
             self.existed[target] = target.exists()
@@ -679,7 +680,7 @@ def process_session_from_mapping(
     own_outputs = outputs is None
     if outputs is None:  # direct callers: track the session on its own
         outputs = _SessionOutputs(config, bids, [source_dir])
-    outputs.start(mapping, bids)
+    outputs.start(mapping)
     try:
         return _process_session(mapping, config, bids, enabled_systems, outputs, source_dir)
     except Exception:

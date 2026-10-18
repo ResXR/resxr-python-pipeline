@@ -398,11 +398,6 @@ class TrackingStream:
         return self.clean_data if self.clean_data is not None else self.data
 
 
-def _first_valid_sample(values: pd.Series) -> float | None:
-    """First finite, nonzero value of a clock column, or None if it has none."""
-    return find_recording_onset(pd.to_numeric(values, errors="coerce").to_numpy(dtype=float))
-
-
 @dataclass
 class Session:
     """
@@ -463,8 +458,8 @@ class Session:
         time_zero = None
         main = self.raw_continuous_data
         if main is not None and "timestamp" in main.columns:
-            time_zero = _first_valid_sample(main["timestamp"])
-
+            clock = pd.to_numeric(main["timestamp"], errors="coerce").to_numpy(dtype=float)
+            time_zero = find_recording_onset(clock)
         if time_zero is None:
             raise DataLoadError(
                 f"Session '{self.session_id}': the main continuous data has no valid "
