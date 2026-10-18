@@ -1963,6 +1963,56 @@ def test_sessions_read_from_their_own_sourcedata_copies(tmp_path, minimal_config
     ]
 
 
+def test_swapped_labels_from_sourcedata_never_write_into_another_sessions_input(
+    tmp_path, minimal_config_dict
+):
+    _, cfg = _two_session_config(tmp_path, minimal_config_dict)
+    bids_root = tmp_path / "bids_out"
+    assert run(str(cfg)).exit_code == 0
+    copies = [bids_root / "sourcedata" / sub / "ses-01" for sub in ("sub-01", "sub-02")]
+    before = [_files(copy) for copy in copies]
+
+    def swap(c):  # output.overwrite is true in this config
+        c["input"]["data_dir"] = str(bids_root / "sourcedata")
+        c["session_mappings"] = [
+            {"source_dir": "sub-01/ses-01", "subject_id": "02", "session_label": "01"},
+            {"source_dir": "sub-02/ses-01", "subject_id": "01", "session_label": "01"},
+        ]
+
+    _edit_config(cfg, swap)
+    result = run(str(cfg))
+    assert [s.processed for s in result.sessions] == [False, False]
+    assert result.sessions[0].reason == (
+        f"The output folder {copies[1]} of sub-01/ses-01 is another mapped session's input "
+        f"folder {copies[1].resolve()}; writing there would mix or copy into that input. "
+        "Change session_mappings or output.bids_root"
+    )
+    assert [_files(copy) for copy in copies] == before
+
+
+def test_an_output_inside_the_sessions_own_input_folder_skips_it_before_any_write(
+    tmp_path, minimal_config_dict
+):
+    session = _write_clocked_session_dir(tmp_path / "sessions", "sess_a", session_id="A")
+    before = _files(session)
+    cfg = _write_config(
+        tmp_path,
+        minimal_config_dict,
+        data_dir=tmp_path / "sessions",
+        bids_root=session / "out",
+        session_mappings=[{"source_dir": "sess_a", "subject_id": "01", "session_label": "01"}],
+    )
+    result = run(str(cfg))
+    assert not result.sessions[0].processed
+    sourcedata = session / "out" / "sourcedata" / "sub-01" / "ses-01"
+    assert result.sessions[0].reason.startswith(
+        f"The output folder {sourcedata} of sess_a lies inside its own input folder "
+        f"{session.resolve()};"
+    )
+    assert _files(session) == before
+    assert not (session / "out").exists()
+
+
 @pytest.mark.parametrize(
     "face_text",
     [

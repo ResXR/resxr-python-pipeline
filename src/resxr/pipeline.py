@@ -399,8 +399,14 @@ class _SessionOutputs:
         self.marked: list[Path] = []
         self.report: Path | None = None
 
-    def start(self, mapping: SessionMapping) -> None:
-        """Record which output folders of the session exist before it is read."""
+    def start(self, mapping: SessionMapping, source_dir: Path) -> None:
+        """Record which output folders of the session exist before it is read.
+
+        Raises DataLoadError when one of them lies inside a session's input
+        folder, or is or holds another session's input folder: writing there
+        would mix, replace or recursively copy that input. The session's own
+        input folder may be a target (a session read from its sourcedata copy).
+        """
         self.name = mapping.source_dir
         self.targets = [
             self.bids.sourcedata_session_dir(mapping),
@@ -414,6 +420,24 @@ class _SessionOutputs:
                     break
                 if folder not in self.existed:
                     self.existed[folder] = self._exists(folder)
+        own = Path(source_dir).resolve()
+        for target in self.targets:
+            p = target.resolve()
+            for d in self.source_dirs:
+                if d in p.parents:
+                    where = "lies inside"
+                elif d != own and p == d:
+                    where = "is"
+                elif d != own and p in d.parents:
+                    where = "holds"
+                else:
+                    continue
+                whose = "its own" if d == own else "another mapped session's"
+                raise DataLoadError(
+                    f"The output folder {target} of {self.name} {where} {whose} input folder "
+                    f"{d}; writing there would mix or copy into that input. Change "
+                    "session_mappings or output.bids_root"
+                )
 
     def add_report(self, path: Path) -> None:
         """Record whether the session's report file exists before it is written."""
@@ -733,7 +757,7 @@ def process_session_from_mapping(
     own_outputs = outputs is None
     if outputs is None:  # direct callers: track the session on its own
         outputs = _SessionOutputs(config, bids, [source_dir])
-    outputs.start(mapping)
+    outputs.start(mapping, source_dir)
     try:
         return _process_session(mapping, config, bids, enabled_systems, outputs, source_dir)
     except Exception:
