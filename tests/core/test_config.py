@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
+import resxr
 from resxr.core.config import (
     BIDSConfig,
     ColumnGroup,
+    ConfigModel,
     DeviceConfig,
     InputConfig,
     OutputConfig,
@@ -193,6 +198,19 @@ class TestUnknownKeys:
         minimal_config_dict["validation"]["settings"] = {"no_check_reads_this": 1}
         config = self._load(tmp_path, minimal_config_dict)
         assert config.validation.settings == {"no_check_reads_this": 1}
+
+
+def test_model_name_fields_import_without_a_pydantic_warning():
+    """pydantic before 2.10 reserves the model_ prefix: 2.0 refuses DeviceConfig.model_name."""
+    assert ConfigModel.model_config["protected_namespaces"] == ()
+    src = Path(resxr.__file__).resolve().parents[1]
+    proc = subprocess.run(
+        [sys.executable, "-W", "error::UserWarning", "-c", "import resxr"],
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(src)},
+    )
+    assert proc.returncode == 0, proc.stderr
 
 
 class TestConfigFields:

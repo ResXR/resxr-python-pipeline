@@ -33,7 +33,7 @@ class ConfigModel(BaseModel):
     against those the registered checks declare.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
 
 class InputConfig(ConfigModel):
