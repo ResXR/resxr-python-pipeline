@@ -330,21 +330,16 @@ def _report_path(session: Session, config: PipelineConfig, bids: BIDSLayout) -> 
 class _SessionOutputs:
     """The output one session writes, so that a skipped session leaves none of its files.
 
-    ``start`` records, before the session is read, which of its output folders
-    already exist: its sourcedata, raw and derivative session folders
-    (``ses-*``) and the folders above them up to the BIDS root (``sub-*``,
-    ``sourcedata``, ``derivatives``, ``derivatives/resxr``); ``add_report``
-    does the same for the report file once the session_id is known. Each write
-    step marks its target with ``writing``. ``remove`` deletes the marked
-    targets that the session created, then the folders above them that it
-    created and left empty, and warns once about each target that existed
-    before the session started (a rerun into an existing output), whether the
-    session wrote into it or not, unless it holds input. Nothing outside the
-    BIDS root and the report directory is deleted, nor any path that is, holds
-    or lies inside a session's input folder, nor the data directory or a folder
-    above it.
-    *written* is shared by the sessions of one run: target -> the session that
-    wrote it, so that a report path two sessions share is reported.
+    ``start`` and ``add_report`` record which targets (session folders, the
+    folders above them, the report) exist before the session writes;
+    ``writing`` marks a target just before it is written; ``remove`` deletes
+    what the session created and warns about each target that existed before.
+    ``_deletable`` keeps every deletion inside the BIDS root or the report
+    directory and off the input: never a session's input folder, a path inside
+    or above it, the data directory or a folder above it.
+
+    *written* is shared by the sessions of one run (target -> the session that
+    wrote it), so that a report path two sessions share is reported.
     """
 
     def __init__(

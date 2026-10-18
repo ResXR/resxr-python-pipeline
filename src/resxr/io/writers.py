@@ -273,7 +273,7 @@ def will_copy_sourcedata(session_dir: Path, dest_dir: Path, overwrite: bool) -> 
 def copy_sourcedata(session_dir: Path, dest_dir: Path, overwrite: bool = False) -> None:
     """Copy a raw session directory verbatim into sourcedata/.
 
-    Verbatim only — no transformation, no filtering. If dest exists and is
+    Verbatim only: no transformation, no filtering. If dest exists and is
     non-empty, skip (and warn) unless overwrite=True, so a re-run never clobbers
     a previously verified copy. With overwrite, the input is copied over the
     existing copy, after its read-only files are made writable; a file no longer
