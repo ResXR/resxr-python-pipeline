@@ -342,19 +342,26 @@ class TrackingStream:
             raise DataLoadError(
                 f"Stream {self.system.value}: no non-zero timestamp found{_CLOCK_HINT}"
             )
-        u = np.unique(self.data["timestamp"].values)
-        u = u[u >= start]
+        u = self.sample_times()
         if u.size < 2:
             raise DataLoadError(
                 f"Stream {self.system.value}: fewer than 2 unique timestamps from first non-zero"
                 f"{_CLOCK_HINT}"
             )
-        total = u[-1] - u[0]
-        if total <= 0:
-            raise DataLoadError(
-                f"Stream {self.system.value}: invalid timestamp span (total time <= 0){_CLOCK_HINT}"
-            )
-        self.sampling_frequency_effective = (u.size - 1) / total
+        self.sampling_frequency_effective = (u.size - 1) / (u[-1] - u[0])
+
+    def sample_times(self) -> np.ndarray:
+        """The stream's samples: its distinct finite non-zero clock values from the onset.
+
+        A new value of the stream's own clock marks a new SDK sample. Used for
+        the effective rate and for the sampling-rate check's irregularity test.
+        """
+        clock = self.data["timestamp"].to_numpy(dtype=float)
+        first = find_first_nonzero_index(clock)
+        if first is None:
+            return np.array([])
+        samples = np.unique(clock[np.isfinite(clock) & (clock != 0)])
+        return samples[samples >= clock[first]]
 
     @property
     def duration_seconds(self) -> float:

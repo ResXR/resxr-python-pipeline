@@ -88,14 +88,8 @@ class SamplingRateCheck:
                     )
                 )
 
-        # Irregular sampling: intervals between the stream's own samples (distinct
-        # finite non-zero clock values from the recording onset, as for the rate)
-        clock = df["timestamp"].to_numpy(dtype=float)
-        first = find_first_nonzero_index(clock)
-        time_diffs = np.array([])
-        if first is not None:
-            samples = np.unique(clock[np.isfinite(clock) & (clock != 0)])
-            time_diffs = np.diff(samples[samples >= clock[first]])
+        # Irregular sampling: intervals between the stream's own samples, as for the rate
+        time_diffs = np.diff(stream.sample_times())
 
         # Calculate coefficient of variation
         if len(time_diffs) > 1 and np.mean(time_diffs) > 0:
