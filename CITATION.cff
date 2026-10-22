@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "ResXR Python Pipeline"
+authors:
+  - given-names: Yehuda
+    family-names: Bergstein
+    orcid: "https://orcid.org/0009-0001-1505-4111"
+    affiliation: Tel Aviv University
+  - given-names: Noa
+    family-names: Barel
+    orcid: "https://orcid.org/0009-0008-1183-0372"
+    affiliation: Tel Aviv University
+  - given-names: Galia
+    family-names: Shai Basson
+    orcid: "https://orcid.org/0009-0001-7768-9139"
+    affiliation: Tel Aviv University
+  - given-names: Omri
+    family-names: Bromberg
+    orcid: "https://orcid.org/0009-0008-6321-7342"
+    affiliation: Tel Aviv University
+  - given-names: Tom
+    family-names: Schonberg
+    orcid: "https://orcid.org/0000-0002-4485-816X"
+    affiliation: Tel Aviv University
+license: Apache-2.0
+repository-code: "https://github.com/ResXR/resxr-python-pipeline"
+url: "https://docs.resxr.org"
+version: "0.2.2"
