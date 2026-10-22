@@ -27,3 +27,4 @@ license: Apache-2.0
 repository-code: "https://github.com/ResXR/resxr-python-pipeline"
 url: "https://docs.resxr.org"
 version: "0.2.2"
+doi: "10.5281/zenodo.23562102"
