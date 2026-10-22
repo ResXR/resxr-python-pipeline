@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _Nothing yet._
 
-## [0.2.2] - 2026-10-04
+## [0.2.2] - 2026-10-22
 
 ### ⚠ Breaking Changes
 
@@ -68,6 +68,21 @@ _Nothing yet._
 - A missing events file is reported (info, or a warning naming a similarly named CSV that was not read); a custom-tables folder whose name does not match `{session_id}_CustomTables`, and `events.tsv` columns that `events.json` does not describe, are warnings. Auto-discovery that finds no session is an error that names deeper folders holding a metadata file. A continuous file with a header and no rows skips its session with an error.
 - Quality checks that cannot run are logged and listed in the HTML report under "Checks not run" (check, stream, reason): `hands_tracking_loss` without its flag column, or with flag values other than 0/1, true/false or blank (a warning, and no hand-loss flags are made from such a column; before, only blank rows counted as lost), `eyes_closed` without `Eyes_Closed_L`/`Eyes_Closed_R`, a check whose stream is absent or has no separate `timeSinceStartup` column, and a check that failed. A stream counts as absent only when it was expected: a stream turned off on purpose (`systems.<name>.enabled: false` in the config, or JSON `false` in its `*_enabled` metadata key) is not listed, and leaves the run summary at info. The reason names only the expected streams and says why each is absent, e.g. "the session has no Hands stream (metadata: hands_enabled missing; no Hands columns in the continuous data)".
 - The shipped configuration's comments say that `sampling_frequencies` holds the expected rate per tracking system in Hz (an integer is accepted), that each `validation.settings` key must be declared by a registered check, and what `alternate_time_columns: {}` does: every stream is timed by `timeSinceStartup` alone, and the sampling-rate, clock-dropout, hand-tracking-loss and eye-closure checks log an error for each stream they check and raise no flags. The CLI help names the repository `ResXR/resxr-python-pipeline` (before, `ResXR/ResXR`) and says that `-q` hides warnings and the run summary.
+
+## [0.2.1] - 2026-06-19
+
+### Fixed
+
+- The HTML report is written to `report.output_dir` when it is set (before, the setting was ignored and the report always went to the session folder of the BIDS dataset, `sub-<label>/ses-<label>`). The shipped configuration leaves it `null`, so the report stays in the session folder.
+- `python -m resxr` exits with the code the CLI returns, as the `resxr` command does (before, it exited 0 even when the configuration file was missing or the run failed).
+
+### Changed
+
+- The shipped configuration no longer has the example `validation.column_groups` (left and right wrist columns) or the `validation.settings.check_column_groups` entry that assigned them to `hands_tracking_loss`; no check in the package reads either key.
+
+### Documentation
+
+- The README is a short front page (description, install, run, license, contributing, citation) with a table that points each topic to its page on https://docs.resxr.org, in place of the full reference it held before (configuration, input format, BIDS output, validation, Python API, reports). After cloning, its install steps run `cd resxr-python-pipeline` (before, `cd ResXR`, a folder the clone does not create).
 
 ## [0.2.0] - 2026-06-15
 
@@ -177,6 +192,7 @@ First public release of the ResXR Python pipeline:
 
 [Unreleased]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.2.2...HEAD
 [0.2.2]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.2.1...v0.2.2
-[0.2.0]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.1.1...v0.2.0
+[0.2.1]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/ResXR/resxr-python-pipeline/releases/tag/v0.2.0
 [0.1.1]: https://github.com/ResXR/resxr-python-pipeline/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/ResXR/resxr-python-pipeline/releases/tag/v0.1.0
