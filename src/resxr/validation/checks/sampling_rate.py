@@ -1,7 +1,8 @@
 """
 Sampling rate validation check for ResXR pipeline.
 
-Validates that actual sampling rate matches expected rate.
+Validates that actual sampling rate matches expected rate, and that the
+intervals between the stream's samples are regular.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from ...core.constants import GLOBAL_CLOCK_COLUMN
 from ...core.logger import get_logger
 from ...core.session import QualityFlag, Session, TrackingStream
 from ...utils import find_first_nonzero_index, find_last_nonzero_index
-from ..registry import register_check
+from ..registry import has_global_clock, register_check
 
 logger = get_logger(__name__)
 
@@ -22,13 +23,20 @@ class SamplingRateCheck:
     """
     Validate sampling frequency consistency.
 
-    Calculates the effective sampling rate and flags significant deviations
-    from the expected rate.
+    Flags the stream when its effective sampling rate deviates from the
+    expected rate by more than ``sampling_rate_tolerance``, and when the
+    intervals between its samples are irregular: their coefficient of
+    variation exceeds ``sampling_cv_threshold``. Both use the stream's own
+    clock (``timestamp``, its distinct finite non-zero values from the
+    recording onset), where a new value marks a new SDK sample; rows are
+    written in per-frame bursts on timeSinceStartup, so its intervals are not
+    the samples'. The flags span the recording on timeSinceStartup.
     """
 
     name = "sampling_rate"
     description = "Validates sampling frequency consistency"
     required_streams = None
+    settings_keys = ("sampling_rate_tolerance", "sampling_cv_threshold")
 
     def __call__(
         self, stream: TrackingStream, session: Session, config: ValidationConfig
@@ -46,12 +54,7 @@ class SamplingRateCheck:
         if actual_rate <= 0:
             return flags
 
-        if GLOBAL_CLOCK_COLUMN not in df.columns:
-            logger.error(
-                f"{stream.system.value}: timeSinceStartup column missing — "
-                "cannot create sampling_rate flags. "
-                "Check alternate_time_columns in pipeline_config.yaml."
-            )
+        if not has_global_clock(self.name, stream, session):
             return flags
         timestamps = df[GLOBAL_CLOCK_COLUMN].values
 
@@ -60,11 +63,9 @@ class SamplingRateCheck:
         if onset_idx is None or offset_idx is None or onset_idx > offset_idx:
             return flags
 
-        # Use a slice for numeric work and a full-length mask for from_mask().
-        window = slice(onset_idx, offset_idx + 1)
+        # The flags span the recording window on timeSinceStartup
         valid_window_mask = np.zeros(len(timestamps), dtype=bool)
-        valid_window_mask[window] = True
-        valid_timestamps = timestamps[window]
+        valid_window_mask[onset_idx : offset_idx + 1] = True
 
         # Check deviation against tolerance from config
         if expected_rate > 0:
@@ -87,9 +88,8 @@ class SamplingRateCheck:
                     )
                 )
 
-        # Also check for highly irregular sampling
-        unique_ts = np.unique(valid_timestamps[np.isfinite(valid_timestamps)])
-        time_diffs = np.diff(unique_ts)
+        # Irregular sampling: intervals between the stream's own samples, as for the rate
+        time_diffs = np.diff(stream.sample_times())
 
         # Calculate coefficient of variation
         if len(time_diffs) > 1 and np.mean(time_diffs) > 0:

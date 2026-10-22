@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -330,8 +332,6 @@ class TestHandsTrackingLossClockDropout:
 
     def test_missing_timeSinceStartup_returns_empty_and_logs_error(self, full_session, caplog):
         """If timeSinceStartup is absent the check must return [] and log an error."""
-        import logging
-
         n = 50
         ts = make_timestamps(n, 90.0, 1.0)
         left = np.zeros(n, dtype=int)  # all tracking lost
@@ -352,3 +352,76 @@ class TestHandsTrackingLossClockDropout:
 
         assert flags == []
         assert "timeSinceStartup" in caplog.text
+
+
+# ===========================================================================
+# Departures from the input contract are reported, not silent
+# ===========================================================================
+
+
+def _flag_spans(flags):
+    return sorted((f.group_name, f.start_time, f.end_time) for f in flags)
+
+
+class TestHandsTrackingLossReportsWhatItCannotRead:
+    def test_missing_flag_column_warns_and_is_recorded(self, full_session, caplog):
+        stream = _make_hands_stream(left_tracked=np.r_[np.ones(50), np.zeros(50)])
+        stream.data = stream.data.drop(columns="RightHand_Status_HandTracked")
+        with caplog.at_level(logging.WARNING):
+            flags = HandsTrackingLossCheck()(stream, full_session, _make_config())
+        assert (
+            "Session 'test_session_001': hands_tracking_loss not run for right_hand: column "
+            "RightHand_Status_HandTracked missing (set validation.settings.tracking_flags)"
+        ) in caplog.text
+        assert {f.group_name for f in flags} == {"left_hand"}  # the other hand still runs
+        assert [(c.check, c.stream, c.reason) for c in full_session.checks_not_run] == [
+            (
+                "hands_tracking_loss",
+                "Hands",
+                "right_hand: column RightHand_Status_HandTracked missing",
+            )
+        ]
+
+    def test_text_labels_warn_and_make_no_flags_for_that_column(self, full_session, caplog):
+        labels = np.array(["Tracked"] * 60 + ["Lost"] * 40, dtype=object)
+        stream = _make_hands_stream(left_tracked=labels)
+        with caplog.at_level(logging.WARNING):
+            flags = HandsTrackingLossCheck()(stream, full_session, _make_config())
+        assert (
+            "hands_tracking_loss not run for left_hand: column LeftHand_Status_HandTracked "
+            "holds values other than 0/1, true/false or blank (Tracked, Lost); "
+            "no hand-loss flags from this column"
+        ) in caplog.text
+        assert not [f for f in flags if f.group_name == "left_hand"]
+        assert full_session.checks_not_run[0].reason.startswith(
+            "left_hand: column LeftHand_Status_HandTracked holds values other than"
+        )
+
+    def test_numeric_values_other_than_0_and_1_make_no_flags(self, full_session, caplog):
+        stream = _make_hands_stream(left_tracked=np.r_[np.full(50, 0.5), np.zeros(50)])
+        with caplog.at_level(logging.WARNING):
+            flags = HandsTrackingLossCheck()(stream, full_session, _make_config())
+        assert "or blank (0.5); no hand-loss flags" in caplog.text
+        assert not [f for f in flags if f.group_name == "left_hand"]
+
+    def test_true_false_text_in_any_case_gives_the_same_flags_as_0_and_1(self, full_session):
+        numeric = np.r_[np.ones(30), np.zeros(20), np.ones(30), np.full(20, np.nan)]
+        text = np.array(
+            ["TRUE"] * 30 + [" false"] * 20 + ["True"] * 30 + [np.nan] * 20, dtype=object
+        )
+        expected = HandsTrackingLossCheck()(
+            _make_hands_stream(left_tracked=numeric), full_session, _make_config()
+        )
+        got = HandsTrackingLossCheck()(
+            _make_hands_stream(left_tracked=text), full_session, _make_config()
+        )
+        assert expected  # the numeric column has losses
+        assert _flag_spans(got) == _flag_spans(expected)
+        assert full_session.checks_not_run == []
+
+    def test_missing_timeSinceStartup_is_recorded(self, full_session):
+        stream = _make_hands_stream()
+        stream.data = stream.data.drop(columns="timeSinceStartup")
+        HandsTrackingLossCheck()(stream, full_session, _make_config())
+        assert [c.check for c in full_session.checks_not_run] == ["hands_tracking_loss"]
+        assert "no separate timeSinceStartup column" in full_session.checks_not_run[0].reason

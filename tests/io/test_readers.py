@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
+import shutil
+from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -93,6 +98,20 @@ class TestLoadFaceData:
         with pytest.raises(DataLoadError):
             load_face_data(tmp_path / "nonexistent.csv")
 
+    def test_face_status_values_with_spaces_are_read_on_every_pandas(self, tmp_path, caplog):
+        path = tmp_path / "x_FaceExpressionData.csv"
+        rows = [" true ", " True", "false ", " 0", "1 ", ""]
+        path.write_text(
+            "timeSinceStartup,Face_Status\n"
+            + "".join(f"{1 + i / 72:.4f},{v}\n" for i, v in enumerate(rows)),
+            encoding="utf-8",
+        )
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            df = load_face_data(path)
+        assert df["Face_Status"].tolist()[:5] == [True, True, False, False, True]
+        assert pd.isna(df["Face_Status"].iloc[5])  # blank stays missing
+        assert "unmapped" not in caplog.text
+
 
 # ===========================================================================
 # load_session_metadata
@@ -152,6 +171,139 @@ class TestLoadSessionMetadata:
         assert meta.face_enabled is False
         assert meta.body_enabled is False
         assert meta.controllers_enabled is False
+        assert meta.flag_problems["hands_enabled"] == "hands_enabled missing"
+
+
+class TestSessionMetadataDepartures:
+    """Metadata that departs from the contract is converted or read with a WARNING."""
+
+    @staticmethod
+    def _load(tmp_path, data, caplog):
+        path = tmp_path / "x_SessionMetadata.json"
+        path.write_text(json.dumps(data), encoding="utf-8")
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            return path, load_session_metadata(path)
+
+    def test_true_false_strings_are_converted_with_a_warning(self, tmp_path, caplog):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02}
+        data.update(hands_enabled="false", eyes_enabled="TRUE", face_enabled=True)
+        path, meta = self._load(tmp_path, data, caplog)
+        assert meta.hands_enabled is False
+        assert meta.eyes_enabled is True
+        assert meta.face_enabled is True
+        assert f"{path}: hands_enabled is the string 'false'; read as false." in caplog.text
+        assert f"{path}: eyes_enabled is the string 'TRUE'; read as true." in caplog.text
+        assert "hands_enabled" not in meta.flag_problems
+
+    @pytest.mark.parametrize(
+        ("value", "shown"), [("no", '"no"'), (1, "1"), (None, "null"), ("yes", '"yes"')]
+    )
+    def test_other_values_read_as_false_with_a_warning(self, tmp_path, caplog, value, shown):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02, "eyes_enabled": value}
+        path, meta = self._load(tmp_path, data, caplog)
+        assert meta.eyes_enabled is False
+        assert f"{path}: eyes_enabled is {shown}, not true or false; read as false." in (
+            caplog.text
+        )
+        assert meta.flag_problems["eyes_enabled"] == f"eyes_enabled is {shown}, not true or false"
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"fixedDeltaTime": 0.02},
+            {"fixedDeltaTime": 0.02, "session_id": None},
+            {"fixedDeltaTime": 0.02, "session_id": ""},
+        ],
+        ids=["missing", "null", "empty"],
+    )
+    def test_missing_session_id_warns_with_its_consequences(self, tmp_path, caplog, data):
+        path, meta = self._load(tmp_path, data, caplog)
+        assert meta.session_id == "unknown"
+        assert (
+            f"{path} has no session_id; using 'unknown': custom tables are read only from a "
+            "folder named 'unknown_CustomTables' and the report is named unknown_report.html"
+        ) in caplog.text
+
+    def test_unparseable_utc_names_the_file_and_the_consequence(self, tmp_path, caplog):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02, "utc_start_iso8601": "10/06/2026"}
+        path, meta = self._load(tmp_path, data, caplog)
+        assert meta.utc_start is None
+        assert (
+            f"Could not parse UTC timestamp: '10/06/2026' (utc_start_iso8601 in {path}); "
+            "scans.tsv acq_time is n/a"
+        ) in caplog.text
+
+    @pytest.mark.parametrize(
+        "written",
+        [
+            "2026-06-10T21:22:45.5772210+03:00",
+            "2026-06-10T15:52:45.5772210-02:30",
+            "2026-06-10T18:22:45.5772210+00:00",
+            "2026-06-10T18:22:45.5772210Z",
+            "2026-06-10T18:22:45.5772210",
+        ],
+        ids=["plus_3h", "minus_2h30", "zero_offset", "Z", "no_offset"],
+    )
+    def test_utc_start_with_an_offset_is_converted_to_utc(self, tmp_path, caplog, written):
+        data = {"session_id": "s", "fixedDeltaTime": 0.02, "utc_start_iso8601": written}
+        _, meta = self._load(tmp_path, data, caplog)
+        assert meta.utc_start == datetime(2026, 6, 10, 18, 22, 45, 577221)
+        assert caplog.records == []
+
+    @pytest.mark.parametrize(
+        "session_id",
+        ["../../evil", "a/b", "a\\b", "..\\x", "a:b", "E:evil", "M:evil", "a?b", "a b", "a*b"],
+    )
+    def test_a_session_id_that_is_not_a_file_name_stem_is_a_load_error(self, tmp_path, session_id):
+        path = tmp_path / "x_SessionMetadata.json"
+        path.write_text(json.dumps({"session_id": session_id}), encoding="utf-8")
+        with pytest.raises(DataLoadError) as excinfo:
+            load_session_metadata(path)
+        assert str(excinfo.value) == (
+            f"{path}: session_id {json.dumps(session_id)} may hold only letters (A-Z, a-z), "
+            "digits, '.', '_' and '-': it names the report and the custom-tables folder (it is "
+            "the prefix of the session's file names). Correct session_id in the metadata file."
+        )
+
+    def test_the_template_session_id_is_accepted(self, tmp_path, caplog):
+        data = {"session_id": "2026.06.10_18-22", "fixedDeltaTime": 0.02}
+        _, meta = self._load(tmp_path, data, caplog)
+        assert meta.session_id == "2026.06.10_18-22"
+        assert caplog.records == []
+
+    @pytest.mark.parametrize(("value", "shown"), [(False, "false"), (123, "123"), ([1], "[1]")])
+    def test_a_session_id_that_is_not_text_is_read_as_unknown(self, tmp_path, caplog, value, shown):
+        path, meta = self._load(tmp_path, {"fixedDeltaTime": 0.02, "session_id": value}, caplog)
+        assert meta.session_id == "unknown"
+        assert (
+            f"{path} has no session_id (it is {shown}, not text); using 'unknown': custom tables "
+            "are read only from a folder named 'unknown_CustomTables'"
+        ) in caplog.text
+
+    @pytest.mark.parametrize(
+        ("value", "shown"), [("0.02", '"0.02"'), (True, "true"), (None, "null")]
+    )
+    def test_a_fixed_delta_time_that_is_not_a_number_defaults_with_a_warning(
+        self, tmp_path, caplog, value, shown
+    ):
+        path, meta = self._load(tmp_path, {"session_id": "s", "fixedDeltaTime": value}, caplog)
+        assert meta.fixed_delta_time == 0.02
+        assert [r.getMessage() for r in caplog.records if "fixedDeltaTime" in r.getMessage()] == [
+            f"SessionMetadata 'fixedDeltaTime' is {shown}, not a number; defaulting to 0.02 s "
+            f"({path}; the value is shown only in the report header)"
+        ]
+
+    @pytest.mark.parametrize("value", [0.011111, 1])
+    def test_a_numeric_fixed_delta_time_is_used_without_a_message(self, tmp_path, caplog, value):
+        _, meta = self._load(tmp_path, {"session_id": "s", "fixedDeltaTime": value}, caplog)
+        assert meta.fixed_delta_time == value
+        assert "fixedDeltaTime" not in caplog.text
+
+    def test_metadata_that_is_not_an_object_is_a_load_error(self, tmp_path):
+        path = tmp_path / "x_SessionMetadata.json"
+        path.write_text("[1, 2]", encoding="utf-8")
+        with pytest.raises(DataLoadError, match="must hold a JSON object"):
+            load_session_metadata(path)
 
 
 # ===========================================================================
@@ -245,8 +397,6 @@ class TestLoadSession:
         Custom tables are optional; a session without the CustomTables folder
         must not emit an ERROR-level log (it pollutes logs for normal sessions).
         """
-        import logging
-
         config = self._input_config(tmp_path)
         with caplog.at_level(logging.DEBUG, logger="resxr.io.readers"):
             load_session(tmp_session_dir, config)
@@ -297,19 +447,21 @@ class TestLoadSession:
             session_dir / "test_ContinuousData.csv", index=False
         )
         config = self._input_config(tmp_path)
-        with pytest.raises(MissingDataError, match="metadata"):
+        with pytest.raises(MissingDataError, match="metadata") as error:
             load_session(session_dir, config)
+        assert "the pattern is input.metadata_pattern" in str(error.value)
 
     def test_missing_continuous_file_raises(self, tmp_path, tmp_metadata_json):
         """Session directory without continuous data raises MissingDataError."""
         session_dir = tmp_path / "session_no_continuous"
         session_dir.mkdir()
-        import shutil
-
         shutil.copy(tmp_metadata_json, session_dir / "session_metadata.json")
         config = self._input_config(tmp_path)
-        with pytest.raises(MissingDataError, match="continuous"):
+        with pytest.raises(MissingDataError, match="continuous") as error:
             load_session(session_dir, config)
+        assert str(error.value).endswith(
+            "(every session folder needs one; the pattern is input.continuous_data_pattern)"
+        )
 
 
 # ===========================================================================
@@ -542,8 +694,6 @@ class TestLoadSessionCustomTableLogging:
         return d
 
     def test_row_count_mismatch_logs_warning(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -554,8 +704,6 @@ class TestLoadSessionCustomTableLogging:
         assert "row_count" in caplog.text
 
     def test_declared_class_without_csv_logs_warning(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -569,8 +717,6 @@ class TestLoadSessionCustomTableLogging:
         assert "no matching CSV" in caplog.text
 
     def test_consistent_schema_no_warning(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -582,8 +728,6 @@ class TestLoadSessionCustomTableLogging:
         assert "no matching CSV" not in caplog.text
 
     def test_multiple_custom_tables_json_prefers_exact_and_warns(self, tmp_path, caplog):
-        import logging
-
         d = self._session_dir(
             tmp_path,
             choice_rows=1,
@@ -596,3 +740,248 @@ class TestLoadSessionCustomTableLogging:
             session = load_session(d, self._config(tmp_path))
         assert session.custom_tables is not None  # exact sess_CustomTables.json was used
         assert "Multiple files matching" in caplog.text
+
+
+# ===========================================================================
+# timeSinceStartup departures are reported (never converted or sorted)
+# ===========================================================================
+
+
+def _zeros_at_the_edges(path, leading: int, trailing: int) -> str:
+    return (
+        f"{path}: timeSinceStartup is 0 in {leading} row(s) before its first valid value and "
+        f"{trailing} after its last; their global latency is n/a, and quality checks and masking "
+        "do not cover them"
+    )
+
+
+class TestClockDepartures:
+    @staticmethod
+    def _load(tmp_path, clock, caplog, loader=load_continuous_data):
+        path = tmp_path / "x_ContinuousData.csv"
+        n = len(clock)
+        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": np.zeros(n)}).to_csv(
+            path, index=False
+        )
+        with caplog.at_level(logging.WARNING, logger="resxr"):
+            df = loader(path)
+        return path, df
+
+    def test_valid_clock_is_silent(self, tmp_path, caplog):
+        self._load(tmp_path, 1.0 + np.arange(50) / 72.0, caplog)
+        assert caplog.records == []
+
+    @pytest.mark.parametrize("loader", [load_continuous_data, load_face_data])
+    def test_leading_and_trailing_zeros_are_counted(self, tmp_path, caplog, loader):
+        clock = np.r_[0.0, 0.0, 1.0 + np.arange(50) / 72.0, 0.0]
+        path, df = self._load(tmp_path, clock, caplog, loader)
+        assert [r.getMessage() for r in caplog.records] == [_zeros_at_the_edges(path, 2, 1)]
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_empty_cells_at_the_edges_are_not_counted_as_zeros(self, tmp_path, caplog):
+        clock = np.r_[np.nan, 0.0, 1.0 + np.arange(50) / 72.0, np.nan]
+        path, _ = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: 2 row(s) have no timeSinceStartup value (empty, NaN or infinite); their "
+            "global latency is n/a",
+            _zeros_at_the_edges(path, 1, 0),
+        ]
+
+    def test_milliseconds_are_reported_and_not_converted(self, tmp_path, caplog):
+        clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
+        path, df = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: the median timeSinceStartup step is 13.89, so the column looks like "
+            "milliseconds or the recording is slower than 2 Hz. It is read as seconds and not "
+            "converted: if it holds milliseconds, latencies, flag times and event onsets will "
+            "be wrong. Write it in seconds"
+        ]
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_backward_steps_are_counted_and_rows_kept_in_order(self, tmp_path, caplog):
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[10:20] = clock[10:20][::-1]
+        path, df = self._load(tmp_path, clock, caplog)
+        assert f"{path}: timeSinceStartup goes backward 9 time(s)." in caplog.text
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_empty_and_infinite_clock_cells_are_counted(self, tmp_path, caplog):
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[5:8] = np.nan
+        clock[30] = np.inf
+        path, _ = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: 4 row(s) have no timeSinceStartup value (empty, NaN or infinite); their "
+            "global latency is n/a"
+        ]
+
+    def test_zero_values_between_valid_values_are_counted(self, tmp_path, caplog):
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[20:30] = 0.0
+        clock = np.r_[0.0, 0.0, clock, 0.0]  # leading and trailing zeros are counted apart
+        path, df = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            _zeros_at_the_edges(path, 2, 1),
+            f"{path}: 10 row(s) have a zero timeSinceStartup between valid values; their "
+            "global latency is n/a",
+        ]
+        assert df["timestamp"].tolist() == pytest.approx(clock.tolist())
+
+    def test_a_clock_with_one_valid_value_is_warned(self, tmp_path, caplog):
+        clock = np.zeros(40)
+        clock[25] = 3.5
+        path, df = self._load(tmp_path, clock, caplog)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"{path}: only 1 of 40 rows has a timeSinceStartup value that is finite and nonzero; "
+            "the global latency of the other rows is n/a, and the clock's steps and gaps cannot "
+            "be checked"
+        ]
+        assert df["timestamp"].tolist() == clock.tolist()
+
+    @pytest.mark.parametrize("clock", [[0.0, 0.0, 0.0], [3.5]], ids=["no_valid_value", "one_row"])
+    def test_no_valid_value_or_a_single_row_is_left_to_the_session_check(
+        self, tmp_path, caplog, clock
+    ):
+        self._load(tmp_path, np.array(clock), caplog)
+        assert caplog.records == []  # the session is skipped later, with an error
+
+    @staticmethod
+    def _gap_lines(tmp_path, clock, caplog, loader=load_continuous_data, head_rate=None):
+        path = tmp_path / "x_ContinuousData.csv"
+        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": 0.0}).to_csv(path, index=False)
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            df = loader(path, head_rate)
+        assert df["timestamp"].tolist() == pytest.approx(list(clock))  # rows kept as read
+        return path, [r for r in caplog.records if "gap(s)" in r.getMessage()]
+
+    @pytest.mark.parametrize("loader", [load_continuous_data, load_face_data])
+    def test_gaps_are_reported_at_info_against_the_expected_head_interval(
+        self, tmp_path, caplog, loader
+    ):
+        clock = 1.0 + np.arange(50) / 100.0  # rows every 10 ms
+        clock[11:] += 0.3  # a 0.31 s step after row 10
+        clock[31:] += 0.5  # a 0.51 s step after row 30, at 1.0 + 0.30 + 0.3 = 1.60
+        clock[41:] += 0.12  # a 0.13 s step: shorter than 10 Head intervals (0.1389 s)
+        clock = np.r_[0.0, clock, 0.0]  # zero rows (before onset, after offset) are not gaps
+        path, (record,) = self._gap_lines(tmp_path, clock, caplog, loader, head_rate=72.0)
+        assert record.levelname == "INFO"
+        assert record.getMessage() == (
+            f"{path}: timeSinceStartup has 2 gap(s) longer than 10 times the expected Head "
+            "interval (0.0139 s); the longest is 0.51 s, after timeSinceStartup 1.60. "
+            "Rows are not interpolated."
+        )
+        warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+        assert warnings == [_zeros_at_the_edges(path, 1, 1)]
+
+    def test_without_a_head_rate_the_reference_is_the_median_step(self, tmp_path, caplog):
+        clock = 1.0 + np.arange(50) / 72.0  # median step 1/72 s = 0.0139 s
+        clock[11:] += 0.3
+        clock[31:] += 0.5  # at 1.0 + 30/72 + 0.3 = 1.72
+        path, (record,) = self._gap_lines(tmp_path, clock, caplog)
+        assert record.getMessage() == (
+            f"{path}: timeSinceStartup has 2 gap(s) longer than 10 times its median step "
+            "(0.0139 s; sampling_frequencies has no Head rate); the longest is 0.51 s, after "
+            "timeSinceStartup 1.72. Rows are not interpolated."
+        )
+
+    def test_rows_in_per_frame_bursts_are_not_gaps(self, tmp_path, caplog):
+        frames = 1.0 + np.arange(40) / 72.0  # three rows per frame, 1 ms apart
+        clock = np.sort(np.r_[frames, frames + 0.001, frames + 0.002])
+        _, lines = self._gap_lines(tmp_path, clock, caplog, head_rate=72.0)
+        assert lines == []  # the median step (1 ms) would have made 39 "gaps"
+
+    def test_a_millisecond_clock_has_no_gap_line(self, tmp_path, caplog):
+        clock = 1000.0 * (1.0 + np.arange(50) / 72.0)
+        clock[25:] += 1000.0  # a 1 s gap, which would read as 1000 s
+        _, lines = self._gap_lines(tmp_path, clock, caplog, head_rate=72.0)
+        assert lines == []
+        assert "looks like milliseconds" in caplog.text
+
+    def test_a_regular_clock_has_no_gap_line(self, tmp_path, caplog):
+        clock = 1.0 + np.arange(50) / 72.0
+        clock[25:] += 0.5 / 72.0  # one step 1.5 times the median is not a gap
+        path = tmp_path / "x_ContinuousData.csv"
+        pd.DataFrame({"timeSinceStartup": clock, "Node_Head_px": 0.0}).to_csv(path, index=False)
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            load_continuous_data(path)
+        assert "gap(s)" not in caplog.text
+
+    def test_semicolon_file_names_the_expected_format(self, tmp_path):
+        path = tmp_path / "x_ContinuousData.csv"
+        path.write_text("timeSinceStartup;Node_Head_px\n1.0;0.1\n1.1;0.2\n", encoding="utf-8")
+        with pytest.raises(DataLoadError, match="must be comma-separated, with a header row"):
+            load_continuous_data(path)
+
+    def test_decimal_comma_file_names_the_expected_format(self, tmp_path):
+        path = tmp_path / "x_ContinuousData.csv"
+        path.write_text("timeSinceStartup;Node_Head_px\n1,0;0,1\n1,1;0,2;3,4,5\n", encoding="utf-8")
+        with pytest.raises(DataLoadError) as error:
+            load_continuous_data(path)
+        message = str(error.value)
+        assert message.startswith(f"Failed to load {path}: Error tokenizing data.")  # pandas
+        assert message.endswith(
+            ". Check that the file is comma-separated with '.' as the decimal separator, "
+            "and that every row has the header's number of fields"
+        )
+        assert chr(10) not in message  # pandas ends its message with a newline
+
+
+# ===========================================================================
+# Optional inputs that are absent or misnamed are reported
+# ===========================================================================
+
+
+class TestOptionalInputsAreReported:
+    @staticmethod
+    def _config(tmp_path: Path) -> InputConfig:
+        return InputConfig(
+            data_dir=tmp_path,
+            continuous_data_pattern="*_ContinuousData.csv",
+            face_data_pattern="*_FaceExpressionData.csv",
+            metadata_pattern="session_metadata.json",
+            events_data_pattern="*_EventsData.csv",
+        )
+
+    @staticmethod
+    def _load(session_dir, config, caplog):
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            return load_session(session_dir, config)
+
+    def test_missing_events_file_is_info_at_default_level(self, tmp_session_dir, tmp_path, caplog):
+        (tmp_session_dir / "test_EventsData.csv").unlink()
+        self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        (record,) = [r for r in caplog.records if "No events file" in r.getMessage()]
+        assert record.levelname == "INFO"
+        assert record.getMessage() == (
+            f"No events file matching '*_EventsData.csv' in {tmp_session_dir}; "
+            "no events.tsv is written (no custom tables either)."
+        )
+
+    def test_misnamed_events_file_is_a_warning_naming_it(self, tmp_session_dir, tmp_path, caplog):
+        (tmp_session_dir / "test_EventsData.csv").rename(tmp_session_dir / "test_Event.csv")
+        self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        (record,) = [r for r in caplog.records if "No events file" in r.getMessage()]
+        assert record.levelname == "WARNING"
+        assert "['test_Event.csv'] not read (rename it or set input.events_data_pattern)" in (
+            record.getMessage()
+        )
+
+    def test_misnamed_custom_tables_folder_is_a_warning(self, tmp_session_dir, tmp_path, caplog):
+        (tmp_session_dir / "CustomTables").mkdir()
+        pd.DataFrame({"onset": [0.1], "duration": [0.0]}).to_csv(
+            tmp_session_dir / "CustomTables" / "test_session_001_Trials.csv", index=False
+        )
+        session = self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        assert session.custom_tables_data == {}
+        assert (
+            f"Custom tables folder(s) ['CustomTables'] in {tmp_session_dir} do not match the "
+            "expected name 'test_session_001_CustomTables' (from session_id 'test_session_001'), "
+            "so their tables are not read."
+        ) in caplog.text
+
+    def test_several_matching_files_name_the_one_used(self, tmp_session_dir, tmp_path, caplog):
+        newer = tmp_session_dir / "test_b_EventsData.csv"
+        shutil.copy(tmp_session_dir / "test_EventsData.csv", newer)
+        os.utime(newer, (2_000_000_000, 2_000_000_000))
+        self._load(tmp_session_dir, self._config(tmp_path), caplog)
+        assert "using most recent by mtime: test_b_EventsData.csv." in caplog.text

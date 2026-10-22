@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -328,8 +330,6 @@ class TestApplyQualityMasking:
 
     def test_missing_timeSinceStartup_returns_unmasked_data_and_logs_error(self, caplog):
         """If timeSinceStartup is absent, masking logs an error and returns data unchanged."""
-        import logging
-
         stream = TrackingStream(
             system=TrackingSystem.HEAD,
             data=_head_df(50).drop(columns=["timeSinceStartup"]),
@@ -392,6 +392,36 @@ class TestPreprocessStream:
 
 
 class TestPrepareMotionData:
+    def test_all_sdk_time_columns_share_selected_origin_and_preserve_offsets(self):
+        df = pd.DataFrame(
+            {
+                "timestamp": [0.0, 100.0, 100.5, 101.0, 101.5],
+                "timeSinceStartup": [1.0, 1.5, 2.0, 2.5, 3.0],
+                "Node_HandRight_Time": [0.0, 100.0, 100.5, np.nan, 0.0],
+                "Node_EyeCenter_Time": [99.5, 100.0, np.inf, 101.0, 101.5],
+                "signal": [1, 2, 3, 4, 5],
+            },
+            index=[10, 20, 30, 40, 50],
+        )
+        original = df.copy(deep=True)
+        output = prepare_motion_data(df)
+        np.testing.assert_allclose(
+            output["Node_HandRight_Time"],
+            [np.nan, 0.0, 0.5, np.nan, np.nan],
+            rtol=0,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        np.testing.assert_allclose(
+            output["Node_EyeCenter_Time"],
+            [-0.5, 0.0, np.nan, 1.0, 1.5],
+            rtol=0,
+            atol=1e-9,
+            equal_nan=True,
+        )
+        assert output["latency"].iloc[2] == output["Node_HandRight_Time"].iloc[2]
+        pd.testing.assert_frame_equal(df, original)
+
     def test_timestamp_converted_to_latency(self, head_stream):
         """'latency' column exists; 'timestamp' is removed from output."""
         result = prepare_motion_data(head_stream.data)
@@ -507,3 +537,22 @@ class TestPrepareMotionData:
         result = prepare_motion_data(head_stream.data)
         # No NaN except if there were leading zeros (there aren't in head_stream)
         assert result["latency"].notna().all()
+
+    def test_zero_or_non_finite_clock_values_inside_the_recording_are_nan(self):
+        """A zero or infinite clock value between valid values gets n/a, as at the edges."""
+        df = pd.DataFrame(
+            {
+                "timestamp": [0.0, 50.0, 0.0, 50.2, np.inf, 50.4, 0.0],
+                "timeSinceStartup": [0.0, 1.0, 1.1, 0.0, 1.3, np.inf, 1.5],
+                "signal": np.ones(7),
+            }
+        )
+        result = prepare_motion_data(df, time_zero=1.0)
+        np.testing.assert_allclose(
+            result["latency"], [np.nan, 0.0, np.nan, 0.2, np.nan, 0.4, np.nan], equal_nan=True
+        )
+        np.testing.assert_allclose(
+            result["latency_global"],
+            [np.nan, 0.0, 0.1, np.nan, 0.3, np.nan, 0.5],
+            equal_nan=True,
+        )

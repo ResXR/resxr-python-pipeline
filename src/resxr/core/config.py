@@ -7,7 +7,7 @@ Provides Pydantic models for type-safe configuration and YAML loading.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import yaml
 from pydantic import (
@@ -16,19 +16,24 @@ from pydantic import (
     Field,
     StrictBool,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
 from .exceptions import ConfigurationError
-from .logger import get_logger
-
-_config_logger = get_logger(__name__)
 
 
 class ConfigModel(BaseModel):
-    """Base model for pipeline configuration objects."""
+    """Base model for pipeline configuration objects.
 
-    model_config = ConfigDict(extra="ignore")
+    Unknown keys are an error at every level, so a misspelled key cannot be
+    ignored without a message. Dict fields with free keys (such as
+    ``validation.settings``) are not models and are not affected here;
+    ``pipeline.validate_config`` checks the keys of ``validation.settings``
+    against those the registered checks declare.
+    """
+
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
 
 class InputConfig(ConfigModel):
@@ -87,9 +92,18 @@ class ColumnGroup(ConfigModel):
 class ValidationConfig(ConfigModel):
     """Configuration for quality validation checks."""
 
+    # validation.settings keys read here, for the checks that call get_column_groups
+    SETTINGS_KEYS: ClassVar[tuple[str, ...]] = ("check_column_groups",)
+
     enabled_checks: list[str]
     column_groups: list[ColumnGroup] = Field(default_factory=list)
     settings: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("settings", mode="before")
+    @classmethod
+    def _empty_settings(cls, value: Any) -> Any:
+        """Treat a commented-out settings block as an empty mapping."""
+        return {} if value is None else value
 
     @model_validator(mode="after")
     def _no_duplicate_group_names(self) -> ValidationConfig:
@@ -163,6 +177,18 @@ class ReferenceFrameConfig(ConfigModel):
     spatial_axes: str
 
 
+class TrackingSpaceFrameConfig(ConfigModel):
+    """Reference frame level for hand joints recorded in the SDK's raw tracking space."""
+
+    description: str = (
+        "Meta tracking space as returned by the SDK: OpenXR right-handed axes, "
+        "+X right, +Y up, -Z forward."
+    )
+    rotation_rule: str = "right-hand"
+    rotation_order: str | None = None  # None: same as reference_frame.rotation_order
+    spatial_axes: str = "RSP"
+
+
 class BIDSConfig(ConfigModel):
     """Configuration for BIDS specification values."""
 
@@ -172,6 +198,9 @@ class BIDSConfig(ConfigModel):
     authors: list[str] = Field(default_factory=list)
     readme_text: str = ""
     reference_frame: ReferenceFrameConfig
+    tracking_space_reference_frame: TrackingSpaceFrameConfig = Field(
+        default_factory=TrackingSpaceFrameConfig
+    )
 
 
 class PipelineConfig(ConfigModel):
@@ -207,7 +236,8 @@ class PipelineConfig(ConfigModel):
         Raises
         ------
         ConfigurationError
-            If the file cannot be read, parsed, or is missing required fields
+            If the file cannot be read or parsed, is missing required fields,
+            or has a key that the configuration does not define (at any level)
         """
         path = Path(path)
         if not path.exists():
@@ -223,20 +253,18 @@ class PipelineConfig(ConfigModel):
         if not data:
             raise ConfigurationError("Empty configuration")
 
-        known_keys = set(cls.model_fields.keys())
-        if isinstance(data, dict):
-            unknown = sorted(set(data.keys()) - known_keys)
-            if unknown:
-                _config_logger.warning(
-                    "Unknown top-level config keys (ignored): %s. Check for typos. Known keys: %s",
-                    unknown,
-                    sorted(known_keys),
-                )
-
         try:
             return cls.model_validate(data)
         except ValidationError as e:
-            raise ConfigurationError(str(e)) from e
+            message = str(e)
+            if isinstance(data, dict):
+                unknown = sorted(str(key) for key in data if key not in cls.model_fields)
+                if unknown:
+                    message += (
+                        f"\nUnknown top-level key(s) {unknown}; check for typos. "
+                        f"Known top-level keys: {sorted(cls.model_fields)}"
+                    )
+            raise ConfigurationError(message) from e
 
     def is_system_enabled(self, system_name: str) -> bool:
         """Check if a tracking system is enabled in config."""

@@ -342,6 +342,18 @@ class TestGenerateDerivativeDescription:
         result = generate_derivative_description("TestDS", "1.10.1")
         assert "TestDS" in result["Name"]
 
+    def test_without_bids_config_there_is_no_license(self):
+        """The two-argument call still works and writes no License."""
+        result = generate_derivative_description("DS", "1.10.1")
+        assert list(result) == ["Name", "BIDSVersion", "DatasetType", "GeneratedBy"]
+
+    def test_license_from_bids_config(self):
+        """License comes from bids_config, as in the raw description, before GeneratedBy."""
+        bids_config = _bids_config().model_copy(update={"license": "CC-BY-4.0"})
+        result = generate_derivative_description("DS", "1.10.1", bids_config)
+        assert result["License"] == "CC-BY-4.0"
+        assert list(result) == ["Name", "BIDSVersion", "DatasetType", "License", "GeneratedBy"]
+
 
 # ===========================================================================
 # generate_participants_json
@@ -403,3 +415,19 @@ class TestGenerateChannelsJson:
         result = generate_channels_json(_bids_config())
         global_level = result["reference_frame"]["Levels"]["global"]
         assert global_level["SpatialAxes"] == "RAS"
+
+    def test_tracking_space_level_only_when_used(self):
+        """The tracking_space level is added on request, with the global RotationOrder."""
+        assert set(generate_channels_json(_bids_config())["reference_frame"]["Levels"]) == {
+            "global"
+        }
+        levels = generate_channels_json(_bids_config(), include_tracking_space=True)[
+            "reference_frame"
+        ]["Levels"]
+        assert levels["tracking_space"] == {
+            "Description": "Meta tracking space as returned by the SDK: OpenXR right-handed "
+            "axes, +X right, +Y up, -Z forward.",
+            "RotationRule": "right-hand",
+            "RotationOrder": "XYZ",
+            "SpatialAxes": "RSP",
+        }

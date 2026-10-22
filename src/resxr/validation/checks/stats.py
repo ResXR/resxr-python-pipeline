@@ -134,6 +134,7 @@ class StatsSummaryCheck:
     name = "stats_summary"
     description = "Per-column descriptive statistics for each tracking stream"
     required_streams = None
+    settings_keys = ()  # reads no validation.settings key
 
     def __call__(
         self,

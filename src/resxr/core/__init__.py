@@ -14,6 +14,7 @@ from .config import (
     ReferenceFrameConfig,
     ReportConfig,
     SessionMapping,
+    TrackingSpaceFrameConfig,
     ValidationConfig,
 )
 from .constants import (
@@ -35,6 +36,7 @@ from .exceptions import (
 )
 from .logger import get_logger, setup_logging
 from .session import (
+    CheckNotRun,
     ColumnInfoEntry,
     CustomTableSchema,
     QualityFlag,
@@ -56,6 +58,7 @@ __all__ = [
     "SessionMetadata",
     "TrackingStream",
     "QualityFlag",
+    "CheckNotRun",
     "ColumnInfoEntry",
     "CustomTableSchema",
     # Config
@@ -69,6 +72,7 @@ __all__ = [
     "DeviceConfig",
     "BIDSConfig",
     "ReferenceFrameConfig",
+    "TrackingSpaceFrameConfig",
     # Exceptions
     "ResXRError",
     "ConfigurationError",

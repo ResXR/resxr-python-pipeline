@@ -144,7 +144,9 @@ def generate_motion_json(
     return metadata
 
 
-def generate_channels_json(bids_config: BIDSConfig) -> dict[str, Any]:
+def generate_channels_json(
+    bids_config: BIDSConfig, include_tracking_space: bool = False
+) -> dict[str, Any]:
     """
     Generate _channels.json sidecar with reference frame specification.
 
@@ -152,6 +154,8 @@ def generate_channels_json(bids_config: BIDSConfig) -> dict[str, Any]:
     ----------
     bids_config : BIDSConfig
         BIDS specification configuration (from config)
+    include_tracking_space : bool
+        Add the "tracking_space" level (when the channels.tsv uses it)
 
     Returns
     -------
@@ -159,17 +163,26 @@ def generate_channels_json(bids_config: BIDSConfig) -> dict[str, Any]:
         JSON-serializable metadata dictionary
     """
     ref = bids_config.reference_frame
+    levels = {
+        "global": {
+            "Description": ref.description,
+            "RotationRule": ref.rotation_rule,
+            "RotationOrder": ref.rotation_order,
+            "SpatialAxes": ref.spatial_axes,
+        }
+    }
+    if include_tracking_space:
+        ts = bids_config.tracking_space_reference_frame
+        levels["tracking_space"] = {
+            "Description": ts.description,
+            "RotationRule": ts.rotation_rule,
+            "RotationOrder": ts.rotation_order or ref.rotation_order,
+            "SpatialAxes": ts.spatial_axes,
+        }
     return {
         "reference_frame": {
             "Description": ref.description,
-            "Levels": {
-                "global": {
-                    "Description": ref.description,
-                    "RotationRule": ref.rotation_rule,
-                    "RotationOrder": ref.rotation_order,
-                    "SpatialAxes": ref.spatial_axes,
-                }
-            },
+            "Levels": levels,
         }
     }
 
@@ -211,6 +224,7 @@ def generate_dataset_description(
 def generate_derivative_description(
     dataset_name: str,
     bids_version: str,
+    bids_config: BIDSConfig | None = None,
 ) -> dict[str, Any]:
     """
     Generate dataset_description.json for a BIDS derivative dataset.
@@ -221,22 +235,24 @@ def generate_derivative_description(
         Name of the dataset
     bids_version : str
         BIDS specification version
+    bids_config : BIDSConfig | None
+        BIDS specification configuration (from config); when given, its
+        License is written, as in the raw description
 
     Returns
     -------
     Dict[str, Any]
         JSON-serializable metadata dictionary
     """
-    return {
+    desc: dict[str, Any] = {
         "Name": f"{dataset_name} (preprocessed)",
         "BIDSVersion": bids_version,
         "DatasetType": "derivative",
-        "GeneratedBy": [
-            {
-                "Name": "ResXR",
-            }
-        ],
     }
+    if bids_config is not None:
+        desc["License"] = bids_config.license
+    desc["GeneratedBy"] = [{"Name": "ResXR"}]
+    return desc
 
 
 def generate_participants_json() -> dict[str, Any]:

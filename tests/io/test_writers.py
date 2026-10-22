@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import logging
 
 import pandas as pd
 import pytest
 
+from resxr.core.exceptions import BIDSWriteError
+from resxr.io import writers
 from resxr.io.writers import (
+    copy_sourcedata,
+    write_bids_events,
     write_bids_tsv,
     write_channels_tsv,
     write_json,
@@ -303,16 +308,12 @@ class TestWriteBidsEvents:
         return {"onset": {"Units": "s"}, "name": {"Description": "Event"}}
 
     def test_writes_tsv_and_json(self, tmp_path):
-        from resxr.io.writers import write_bids_events
-
         path = tmp_path / "events.tsv"
         write_bids_events(self._wide(), path, self._sidecar())
         assert path.exists()
         assert (tmp_path / "events.json").exists()
 
     def test_extra_columns_not_dropped(self, tmp_path):
-        from resxr.io.writers import write_bids_events
-
         path = tmp_path / "events.tsv"
         write_bids_events(self._wide(), path, self._sidecar())
         df = pd.read_csv(path, sep="\t")
@@ -321,25 +322,16 @@ class TestWriteBidsEvents:
         assert "trial_type" not in df.columns
 
     def test_sidecar_content_matches(self, tmp_path):
-        import json as _json
-
-        from resxr.io.writers import write_bids_events
-
         path = tmp_path / "events.tsv"
         write_bids_events(self._wide(), path, self._sidecar())
-        assert _json.loads((tmp_path / "events.json").read_text()) == self._sidecar()
+        assert json.loads((tmp_path / "events.json").read_text()) == self._sidecar()
 
     def test_missing_required_column_raises(self, tmp_path):
-        from resxr.core.exceptions import BIDSWriteError
-        from resxr.io.writers import write_bids_events
-
         bad = pd.DataFrame({"name": ["x"], "duration": [1.0]})
         with pytest.raises(BIDSWriteError):
             write_bids_events(bad, tmp_path / "events.tsv", {})
 
     def test_non_tsv_path_raises_valueerror(self, tmp_path):
-        from resxr.io.writers import write_bids_events
-
         with pytest.raises(ValueError):
             write_bids_events(self._wide(), tmp_path / "events.csv", {})
 
@@ -351,8 +343,6 @@ class TestWriteBidsEvents:
 
 class TestCopySourcedata:
     def test_copies_verbatim_including_subdirs(self, tmp_path):
-        from resxr.io.writers import copy_sourcedata
-
         src = tmp_path / "src"
         (src / "sub").mkdir(parents=True)
         (src / "a.csv").write_text("x,y\n1,2\n")
@@ -363,10 +353,6 @@ class TestCopySourcedata:
         assert (dest / "sub" / "b.json").read_text() == '{"k": 1}'
 
     def test_skips_when_dest_nonempty_and_no_overwrite(self, tmp_path, caplog):
-        import logging
-
-        from resxr.io.writers import copy_sourcedata
-
         src = tmp_path / "src"
         src.mkdir()
         (src / "a.csv").write_text("new")
@@ -380,8 +366,6 @@ class TestCopySourcedata:
         assert "skipping" in caplog.text.lower()
 
     def test_recopies_when_overwrite_true(self, tmp_path):
-        from resxr.io.writers import copy_sourcedata
-
         src = tmp_path / "src"
         src.mkdir()
         (src / "a.csv").write_text("new")
@@ -390,3 +374,17 @@ class TestCopySourcedata:
         (dest / "existing.csv").write_text("old")
         copy_sourcedata(src, dest, overwrite=True)
         assert (dest / "a.csv").exists()
+
+    @pytest.mark.parametrize("overwrite", [True, False])
+    def test_copies_nothing_when_dest_is_the_input_folder(self, tmp_path, caplog, overwrite):
+        src = tmp_path / "sourcedata" / "sub-01" / "ses-01"
+        src.mkdir(parents=True)
+        (src / "a.csv").write_text("x")
+        dest = tmp_path / "sourcedata" / "sub-01" / ".." / "sub-01" / "ses-01"  # the same folder
+        assert not writers.will_copy_sourcedata(src, dest, overwrite)
+        with caplog.at_level(logging.INFO, logger="resxr"):
+            copy_sourcedata(src, dest, overwrite=overwrite)
+        assert [r.getMessage() for r in caplog.records] == [
+            f"sourcedata is the input folder; nothing copied ({dest})"
+        ]
+        assert [p.name for p in src.iterdir()] == ["a.csv"]

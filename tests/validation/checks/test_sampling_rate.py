@@ -8,6 +8,7 @@ import pytest
 
 from resxr.core.config import ValidationConfig
 from resxr.core.constants import TrackingSystem
+from resxr.core.exceptions import DataLoadError
 from resxr.core.session import TrackingStream
 from resxr.validation.checks.sampling_rate import SamplingRateCheck
 
@@ -184,6 +185,77 @@ class TestSamplingRateIrregularityFlag:
         assert cv_flags == []
 
 
+def _template_like_stream(sdk_times: np.ndarray, app_times: np.ndarray) -> TrackingStream:
+    """A stream with its own SDK clock (``timestamp``) and the application clock."""
+    df = pd.DataFrame(
+        {
+            "timestamp": sdk_times,
+            "timeSinceStartup": app_times,
+            "Node_Head_px": np.zeros(len(app_times)),
+        }
+    )
+    return TrackingStream(system=TrackingSystem.HEAD, data=df, sampling_frequency=72.0)
+
+
+def _bursty_rows(n_frames: int = 300):
+    """Rows written in per-frame bursts, as the template's FixedUpdate logging does.
+
+    Frames at 72 Hz; 1 or 2 rows per frame (100 rows/s), 1 ms apart within a frame. Each
+    row holds the newest head sample, which the SDK delivers once per frame at 72 Hz.
+    """
+    frames = 1.0 + np.arange(n_frames) / 72.0
+    rows_per_frame = np.where(np.arange(n_frames) % 18 < 7, 2, 1)  # 25 rows per 18 frames
+    app = np.concatenate(
+        [f + 0.001 * np.arange(k) for f, k in zip(frames, rows_per_frame, strict=True)]
+    )
+    sdk = np.repeat(500.0 + np.arange(n_frames) / 72.0, rows_per_frame)
+    return sdk, app
+
+
+def _cv(times: np.ndarray) -> float:
+    steps = np.diff(np.unique(times))
+    return float(np.std(steps) / np.mean(steps))
+
+
+class TestIrregularityUsesTheStreamClock:
+    """D11: the irregularity test measures the intervals between the stream's own samples."""
+
+    @staticmethod
+    def _irregular(stream, session) -> list:
+        flags = SamplingRateCheck()(stream, session, _make_config())
+        return [f for f in flags if f.message.startswith("Highly irregular sampling")]
+
+    def test_bursty_rows_with_regular_sdk_samples_give_no_flag(self, full_session):
+        sdk, app = _bursty_rows()
+        assert _cv(app) > 0.5  # the application clock alone would have flagged it
+        assert self._irregular(_template_like_stream(sdk, app), full_session) == []
+
+    def test_irregular_sdk_samples_give_one_flag_spanning_the_recording(self, full_session):
+        rng = np.random.default_rng(7)
+        app = 1.0 + np.arange(300) / 100.0  # regular rows
+        sdk = 500.0 + np.cumsum(rng.exponential(scale=1.0 / 72.0, size=300))
+        app[:3] = 0.0  # rows before onset are outside the flag
+        (flag,) = self._irregular(_template_like_stream(sdk, app), full_session)
+        assert flag.message == f"Highly irregular sampling: CV={_cv(sdk[3:]):.2f}"
+        assert flag.message != "Highly irregular sampling: CV=0.00"
+        assert (flag.start_time, flag.end_time) == pytest.approx((app[3], app[-1]))
+
+    def test_zero_and_empty_sdk_values_are_not_samples(self, full_session):
+        sdk, app = _bursty_rows()
+        sdk[:10] = 0.0  # not tracked yet
+        sdk[200:210] = 0.0  # a dropout inside the recording (the clock_dropout check's case)
+        sdk[100] = np.nan
+        assert self._irregular(_template_like_stream(sdk, app), full_session) == []
+
+    def test_a_stream_without_its_own_clock_is_recorded_as_not_run(self, full_session):
+        ts = 1.0 + np.arange(100) / 72.0
+        df = pd.DataFrame({"timestamp": ts, "Node_Head_px": np.zeros(100)})
+        stream = TrackingStream(system=TrackingSystem.HEAD, data=df, sampling_frequency=72.0)
+        assert SamplingRateCheck()(stream, full_session, _make_config()) == []
+        (not_run,) = full_session.checks_not_run
+        assert (not_run.check, not_run.stream) == ("sampling_rate", "Head")
+
+
 # ===========================================================================
 # Edge cases
 # ===========================================================================
@@ -208,7 +280,7 @@ class TestSamplingRateEdgeCases:
         This documents that the check is never invoked on a 1-row stream because
         the TrackingStream constructor itself prevents it.
         """
-        with pytest.raises(ValueError, match="at least 2 rows"):
+        with pytest.raises(DataLoadError, match="at least 2 rows"):
             TrackingStream(
                 system=TrackingSystem.HEAD,
                 data=pd.DataFrame({"timestamp": [1.0], "Node_Head_px": [0.0]}),
@@ -221,7 +293,7 @@ class TestSamplingRateEdgeCases:
         This documents that the check is never invoked on a stream without
         timestamps because the TrackingStream constructor itself prevents it.
         """
-        with pytest.raises(ValueError, match="timestamp"):
+        with pytest.raises(DataLoadError, match="timestamp"):
             TrackingStream(
                 system=TrackingSystem.HEAD,
                 data=pd.DataFrame({"Node_Head_px": [0.0, 1.0, 2.0]}),

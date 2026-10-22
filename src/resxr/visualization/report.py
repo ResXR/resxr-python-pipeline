@@ -158,6 +158,14 @@ class ReportGenerator:
             # Summary stats
             "total_duration": session.total_duration_seconds,
             "total_warnings": session.total_warning_count,
+            "hand_joint_frames": ", ".join(
+                f"{side} {frame}" for side, frame in session.hand_joint_frames.items()
+            ),
+            # Enabled checks that produced no result for a stream, and why
+            "checks_not_run": [
+                {"check": entry.check, "stream": entry.stream, "reason": entry.reason}
+                for entry in session.checks_not_run
+            ],
             # Per-stream info
             "streams": self._stream_stats(session),
             # Quality flags (times relative to global recording onset)
@@ -203,6 +211,7 @@ class ReportGenerator:
                 continue
             if GLOBAL_CLOCK_COLUMN not in stream.data.columns:
                 logger.warning(
+                    f"Session '{session.session_id}': "
                     f"{stream.system.value}: missing timeSinceStartup column, "
                     "cannot compute global onset for this stream"
                 )
@@ -212,7 +221,10 @@ class ReportGenerator:
                 onsets.append(onset)
 
         if not onsets:
-            logger.warning("No global onset found from timeSinceStartup across any stream")
+            logger.warning(
+                f"Session '{session.session_id}': no global onset found from timeSinceStartup "
+                "across any stream; report times are relative to 0"
+            )
             global_onset = 0.0
         else:
             global_onset = min(onsets)
@@ -498,4 +510,4 @@ class ReportGenerator:
             categoryorder="array", categoryarray=list(reversed(stream_names)), row=2, col=1
         )
 
-        return fig.to_html(full_html=False, include_plotlyjs="cdn")
+        return fig.to_html(full_html=False, include_plotlyjs=True)

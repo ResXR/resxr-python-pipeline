@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -375,3 +377,36 @@ class TestEyesClosedMinDuration:
         flags = check(face, session, config)
         face_flags = [f for f in flags if f.system == TrackingSystem.FACE]
         assert len(face_flags) >= 1
+
+
+class TestEyesClosedReportsWhatItCannotRead:
+    def test_missing_eyes_closed_column_warns_and_is_recorded(self, session_metadata, caplog):
+        n = 100
+        face = _make_face_stream(n=n, left_values=np.full(n, 0.95), right_values=np.full(n, 0.95))
+        face.data = face.data.rename(columns={"Eyes_Closed_R": "EyesClosed_R"})
+        session = _make_session_face_only(face, session_metadata)
+        with caplog.at_level(logging.WARNING):
+            flags = EyesClosedCheck()(face, session, _make_config())
+        assert flags == []
+        assert (
+            "Session 'test': eyes_closed not run: columns Eyes_Closed_R missing from the face "
+            "file (the check reads Eyes_Closed_L and Eyes_Closed_R)"
+        ) in caplog.text
+        assert [(c.check, c.stream, c.reason) for c in session.checks_not_run] == [
+            ("eyes_closed", "Face", "columns Eyes_Closed_R missing")
+        ]
+
+    def test_missing_timeSinceStartup_is_recorded_even_without_closures(
+        self, session_metadata, caplog
+    ):
+        face = _make_face_stream()  # eyes open throughout
+        face.data = face.data.drop(columns="timeSinceStartup")
+        session = _make_session_face_only(face, session_metadata)
+        with caplog.at_level(logging.ERROR):
+            assert EyesClosedCheck()(face, session, _make_config()) == []
+        assert (
+            f"Session '{session.session_id}': eyes_closed not run on Face: no separate "
+            "timeSinceStartup column (the stream has no per-system clock column; see "
+            "preprocessing.alternate_time_columns), so it can place no flags"
+        ) in caplog.text
+        assert [c.check for c in session.checks_not_run] == ["eyes_closed"]
