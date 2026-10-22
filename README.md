@@ -80,10 +80,8 @@ Contributions are welcome. Fork the repository, create a feature branch, and ope
 
 ## Citation
 
-```bibtex
-@software{resxr,
-  title = {ResXR: XR Experiment Data Processing Pipeline},
-  year  = {2026},
-  url   = {https://github.com/ResXR/resxr-python-pipeline}
-}
-```
+If you use the pipeline in your research, please cite it with its Zenodo DOI, [10.5281/zenodo.23562102](https://doi.org/10.5281/zenodo.23562102). This DOI covers all versions and resolves to the latest release; the v0.2.2 release also has its own DOI, [10.5281/zenodo.23562103](https://doi.org/10.5281/zenodo.23562103).
+
+Bergstein, Y., Barel, N., Shai Basson, G., Bromberg, O., & Schonberg, T. (2026). *ResXR Python Pipeline* [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.23562102
+
+GitHub's **Cite this repository** link, in the sidebar of the repository page, exports the metadata in [CITATION.cff](CITATION.cff) as APA or BibTeX.
